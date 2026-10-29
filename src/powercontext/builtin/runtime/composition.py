@@ -971,7 +971,10 @@ def _artifact_processing_bindings(  # noqa: C901 - validate and assemble one reg
         "handoff": None,
         "prompt": None,
     }
-    for family, schedule in automatic.items():
+    # A distributed deployment never runs the process-local supervisor, so a
+    # schedule there only paces the Work Ledger discoverer and cannot require a
+    # local candidate pipeline.
+    for family, schedule in automatic.items() if config.deployment.mode != "distributed" else ():
         if schedule is not None and family not in declared | registered:
             if (
                 family == "topic-memory"
@@ -2156,9 +2159,21 @@ async def preflight_builtin_runtime(
             )
         if config.inference.embedding_model is not None:
             await _embedding_models(config.inference, resources, None)
-        if config.runtime.schedule_seconds is not None and config.inference.generation_model is None:
+        # A distributed deployment runs no local schedule: the Work Ledger
+        # paces discovery and the Worker executes elsewhere, so a persisted
+        # interval there does not require a model in this process.
+        executes_scheduled_work_locally = config.deployment.mode != "distributed"
+        if (
+            executes_scheduled_work_locally
+            and config.runtime.schedule_seconds is not None
+            and config.inference.generation_model is None
+        ):
             raise BuiltinConfigurationError("scheduled-pipeline")
-        if config.runtime.experience_schedule_seconds is not None and config.inference.generation_model is None:
+        if (
+            executes_scheduled_work_locally
+            and config.runtime.experience_schedule_seconds is not None
+            and config.inference.generation_model is None
+        ):
             raise BuiltinConfigurationError("scheduled-experience-pipeline")
         if config.runtime.memory_rerank_enabled and (
             config.inference.generation_model is None and config.inference.rerank_model is None

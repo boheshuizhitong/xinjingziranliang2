@@ -266,7 +266,13 @@ class ServerSettings(BaseSettings):
     @model_validator(mode="after")
     def configure_default_local_skill_targets(self) -> ServerSettings:
         if "external_skills" not in self.model_fields_set:
-            self.external_skills = _default_local_external_skills(self.workspace)
+            if self.deployment.mode == "distributed":
+                # A distributed deployment rejects host-local Skill targets, so
+                # injecting the workspace defaults here would make every
+                # distributed configuration invalid before it is read.
+                self.external_skills = ExternalSkillsConfig()
+            else:
+                self.external_skills = _default_local_external_skills(self.workspace)
         return self
 
     @field_validator("public_url")

@@ -626,6 +626,10 @@ class BuiltinConfig(BaseModel):
                 raise ValueError(  # noqa: TRY003
                     "distributed deployment does not support host-local external Skill targets"
                 )
+            if self.deployment.role == "worker" and self.inference.generation_model is None:
+                # The worker executes Memory, Experience and Profile work, and
+                # every one of those paths calls a generation model.
+                raise ValueError("distributed worker requires a generation model")  # noqa: TRY003
         if not isinstance(self.database, OceanBaseConfig) and self.runtime.artifact_processing_role != "all":
             raise ValueError(  # noqa: TRY003
                 "runtime.artifact_processing_role must be 'all' for SQLite and embedded seekdb"
