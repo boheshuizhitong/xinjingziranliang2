@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -896,6 +897,9 @@ async def open_builtin_runtime(
             )
         )
         contexts.profiles.operation_context = runtime._operation
+        runtime.work_background = await resources.enter_async_context(
+            _open_work_background(config, contexts, tracing=tracing)
+        )
         if config.handoff_report.enabled:
             runtime.handoff_report = HandoffReportApplication(
                 contexts.scopes,
@@ -1112,6 +1116,217 @@ async def _open_artifact_processing_supervisor(
             )
             supervisors.append(supervisor)
         yield ArtifactProcessingSupervisors(tuple(supervisors))
+
+
+class WorkBackground:
+    """Role-specific durable Work Ledger services attached to one runtime.
+
+    ``operations`` is always present so the HTTP layer can inspect, cancel and
+    retry history regardless of role; the execution components stay ``None`` when
+    the role does not run them or no background schedule is configured.
+    """
+
+    __slots__ = ("membership", "operations", "scheduler", "worker")
+
+    def __init__(
+        self,
+        *,
+        operations: Any,
+        membership: Any = None,
+        scheduler: Any = None,
+        worker: Any = None,
+    ) -> None:
+        self.operations = operations
+        self.membership = membership
+        self.scheduler = scheduler
+        self.worker = worker
+
+
+def _work_background_requested(config: BuiltinConfig) -> bool:
+    """True when this deployment asked for ledger-driven background execution."""
+
+    runtime = config.runtime
+    return (
+        config.deployment.mode == "distributed"
+        or runtime.memory_schedule_seconds is not None
+        or runtime.experience_schedule_seconds is not None
+        or runtime.profile_schedule_enabled
+    )
+
+
+def _work_discoverers(config: BuiltinConfig, contexts: RelationalContexts) -> tuple[Any, ...]:
+    from powercontext.builtin.runtime.work_handlers import (
+        CURRENT_WORK_PAYLOAD_VERSION,
+        ExperienceWorkDiscoverer,
+        MemoryWorkDiscoverer,
+        OperationMaintenanceDiscoverer,
+        ProfileWorkDiscoverer,
+    )
+
+    runtime = config.runtime
+    maximum = config.worker.max_attempts
+    discoverers: list[Any] = []
+    if runtime.memory_schedule_seconds is not None:
+        discoverers.append(
+            MemoryWorkDiscoverer(
+                contexts,
+                interval_seconds=runtime.memory_schedule_seconds,
+                window_limit=runtime.source_window_limit,
+                max_attempts=maximum,
+                payload_version=CURRENT_WORK_PAYLOAD_VERSION,
+            )
+        )
+    if runtime.experience_schedule_seconds is not None:
+        discoverers.append(
+            ExperienceWorkDiscoverer(
+                contexts,
+                interval_seconds=runtime.experience_schedule_seconds,
+                window_limit=runtime.source_window_limit,
+                max_attempts=maximum,
+                payload_version=CURRENT_WORK_PAYLOAD_VERSION,
+            )
+        )
+    if runtime.profile_schedule_enabled:
+        discoverers.append(
+            ProfileWorkDiscoverer(
+                contexts,
+                cron=runtime.profile_cron,
+                timezone=runtime.profile_timezone,
+                max_attempts=maximum,
+                payload_version=CURRENT_WORK_PAYLOAD_VERSION,
+            )
+        )
+    discoverers.append(
+        OperationMaintenanceDiscoverer(
+            interval_seconds=config.operations.cleanup_interval_seconds,
+            max_attempts=maximum,
+        )
+    )
+    return tuple(discoverers)
+
+
+def _work_handlers(config: BuiltinConfig, contexts: RelationalContexts) -> tuple[Any, ...]:
+    from powercontext.builtin.runtime.work_handlers import (
+        ExperienceWorkHandler,
+        MemoryWorkHandler,
+        OperationMaintenanceHandler,
+        ProfileWorkHandler,
+    )
+
+    runtime = config.runtime
+    return (
+        MemoryWorkHandler(contexts, window_limit=runtime.source_window_limit),
+        ExperienceWorkHandler(contexts),
+        ProfileWorkHandler(
+            contexts.profiles,
+            max_concurrency=runtime.profile_max_concurrency,
+        ),
+        OperationMaintenanceHandler(
+            retention_days=config.operations.retention_days,
+            batch_size=config.operations.cleanup_batch_size,
+        ),
+    )
+
+
+def _build_version() -> str:
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        return version("powercontext")
+    except PackageNotFoundError:  # pragma: no cover - source checkouts without installed metadata
+        return "unknown"
+
+
+@asynccontextmanager
+async def _open_work_background(
+    config: BuiltinConfig,
+    contexts: RelationalContexts,
+    *,
+    tracing: RuntimeTracing | None = None,
+) -> AsyncIterator[WorkBackground]:
+    """Start the durable Work Ledger components this role is responsible for.
+
+    A single-node deployment keeps every role in one process and only starts the
+    ledger when a background schedule is configured, so an unconfigured install
+    behaves exactly as before. A distributed deployment splits the roles and the
+    API process never claims or scans work.
+    """
+
+    from powercontext.builtin.runtime.durable_scheduler import DurableScheduler
+    from powercontext.builtin.runtime.membership import RuntimeMembership
+    from powercontext.builtin.runtime.operations import OperationManager
+    from powercontext.builtin.runtime.work_handlers import CURRENT_WORK_PAYLOAD_VERSION
+    from powercontext.builtin.runtime.worker import DurableWorker
+
+    if not _work_background_requested(config):
+        yield WorkBackground(
+            operations=OperationManager(
+                contexts=contexts,
+                operations=config.operations,
+                worker=config.worker,
+                local_worker=None,
+                payload_version=CURRENT_WORK_PAYLOAD_VERSION,
+            )
+        )
+        return
+
+    role = config.deployment.role
+    async with AsyncExitStack() as stack:
+        membership = RuntimeMembership(
+            database=contexts.database,
+            deployment=config.deployment,
+            coordination=config.coordination,
+            build_version=_build_version(),
+        )
+        await membership.start()
+        stack.push_async_callback(membership.stop)
+        scheduler = (
+            DurableScheduler(
+                database=contexts.database,
+                scheduler_id=f"{membership.instance_id}:scheduler",
+                discoverers=_work_discoverers(config, contexts),
+                config=config.coordination,
+                tracing=tracing,
+            )
+            if role in ("all", "scheduler")
+            else None
+        )
+        worker = (
+            DurableWorker(
+                database=contexts.database,
+                worker_id=f"{membership.instance_id}:worker",
+                handlers=_work_handlers(config, contexts),
+                config=config.worker,
+                tracing=tracing,
+            )
+            if role in ("all", "worker")
+            else None
+        )
+        components = [component for component in (membership, scheduler, worker) if component is not None]
+        tasks = [
+            asyncio.create_task(component.run(), name=f"powercontext-work-{index}")
+            for index, component in enumerate(components)
+        ]
+        try:
+            yield WorkBackground(
+                operations=OperationManager(
+                    contexts=contexts,
+                    operations=config.operations,
+                    worker=config.worker,
+                    local_worker=worker,
+                    payload_version=CURRENT_WORK_PAYLOAD_VERSION,
+                ),
+                membership=membership,
+                scheduler=scheduler,
+                worker=worker,
+            )
+        finally:
+            # Drain the worker before leadership and membership disappear so an
+            # in-flight claim still commits under a valid lease.
+            for component in (worker, scheduler, membership):
+                if component is not None:
+                    await component.stop()
+            await asyncio.gather(*tasks, return_exceptions=True)
 
 
 @asynccontextmanager

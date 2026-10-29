@@ -28,6 +28,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from powercontext.builtin.artifacts.atomic_memory.errors import AtomicMemoryConflictError
 from powercontext.builtin.artifacts.experience import EXPERIENCE_INCUBATION_CURSOR_NAME
 from powercontext.builtin.artifacts.profile.models import (
     PROFILE_SOURCE_WINDOW_BINDING,
@@ -50,14 +51,15 @@ from powercontext.builtin.persistence.work import (
 from powercontext.builtin.records import BaseValueConflictError
 from powercontext.builtin.runtime.cron import CronSchedule
 from powercontext.builtin.runtime.durable_scheduler import DiscoveryPage
-from powercontext.builtin.runtime.models import ExperienceIncubationResult
+from powercontext.builtin.runtime.models import ExperienceIncubationResult, MemoryFlushResult
 from powercontext.builtin.runtime.relational import RelationalContexts, _validate_experience_plans
 from powercontext.builtin.runtime.worker import PreparedWork, WorkExecutionError
 from powercontext.builtin.sources import SourceCursor, validate_scope_id
 from powercontext.builtin.statistics import ModelUsagePurpose
-from powercontext.builtin.triggers import SourceHighWatermark, SourceWindowTrigger
+from powercontext.builtin.triggers import SOURCE_WINDOW_TRIGGER_NAME, SourceHighWatermark, SourceWindowTrigger
 from powercontext.errors import RevisionConflictError
 
+MEMORY_WORK_KIND = "powercontext.memory.source-window"
 EXPERIENCE_WORK_KIND = "powercontext.experience.incubation"
 PROFILE_WORK_KIND = "powercontext.profile.source-window"
 MAINTENANCE_WORK_KIND = "powercontext.maintenance.operations"
@@ -103,6 +105,45 @@ class ProfileWorkPayload(BaseModel):
     cursor_generation: int = Field(ge=0)
     after: int = Field(ge=0)
     high_watermark: int = Field(ge=1)
+
+
+class MemoryWorkDiscoverer:
+    """Scan Source scopes and describe pending Memory windows."""
+
+    name = MEMORY_WORK_KIND
+
+    def __init__(
+        self,
+        contexts: RelationalContexts,
+        *,
+        interval_seconds: float,
+        window_limit: int,
+        max_attempts: int,
+        payload_version: int = CURRENT_WORK_PAYLOAD_VERSION,
+    ) -> None:
+        self._contexts = contexts
+        self.interval_seconds = interval_seconds
+        self._window_limit = window_limit
+        self._max_attempts = max_attempts
+        self._payload_version = payload_version
+
+    async def page(self, continuation: str | None, limit: int, /) -> DiscoveryPage:
+        scopes = await self._contexts.scope_ids_page(continuation, limit)
+        specs: list[WorkSpec] = []
+        for scope_id in scopes:
+            spec = await memory_work_spec(
+                self._contexts,
+                scope_id,
+                limit=self._window_limit,
+                max_attempts=self._max_attempts,
+                payload_version=self._payload_version,
+            )
+            if spec is not None:
+                specs.append(spec)
+        return DiscoveryPage(
+            specs=tuple(specs),
+            continuation=scopes[-1] if len(scopes) == limit else None,
+        )
 
 
 class ExperienceWorkDiscoverer:
@@ -220,6 +261,66 @@ class OperationMaintenanceDiscoverer:
                 ),
             ),
             continuation=None,
+        )
+
+
+class MemoryWorkHandler:
+    """Run one claimed Memory window through the Atomic Memory processor.
+
+    The window, its model calls and its commit stay one Atomic Memory flush: this
+    handler owns the retry and fencing story, while the processor keeps the
+    single-transaction cursor/artifact commit. A retried attempt re-reads the
+    cursor, so a window that already committed retires instead of repeating the
+    domain write.
+    """
+
+    kind = MEMORY_WORK_KIND
+    supported_versions = frozenset({CURRENT_WORK_PAYLOAD_VERSION})
+
+    def __init__(self, contexts: RelationalContexts, *, window_limit: int) -> None:
+        self._contexts = contexts
+        self._window_limit = window_limit
+
+    async def prepare(self, claim: WorkClaim, /) -> PreparedWork:
+        payload = _payload(claim)
+        services = self._contexts._services_for(claim.scope_id)
+        async with self._contexts.database.transaction() as connection:
+            state_row = await services.repositories.cursors.load(
+                connection,
+                claim.scope_id,
+                SOURCE_WINDOW_TRIGGER_NAME,
+            )
+        current_sequence, current_generation = _cursor_position(state_row)
+        if current_sequence >= payload.through:
+            return PreparedWork(
+                result=_memory_result(
+                    payload,
+                    current=current_sequence,
+                    source_count=0,
+                    code="already_committed",
+                )
+            )
+        if _is_superseded_window(payload, current_sequence, current_generation):
+            # A committed racing window consumed this snapshot's prefix; retire
+            # the key so the lane keeps moving and discovery re-enqueues the rest.
+            return PreparedWork(
+                result=_memory_result(
+                    payload,
+                    current=current_sequence,
+                    source_count=0,
+                    code="superseded",
+                )
+            )
+        _require_exact_cursor(payload, current_sequence, current_generation)
+        try:
+            flushed = await self._contexts.process_memory(claim.scope_id, self._window_limit)
+        except (AtomicMemoryConflictError, GenerationConflictError, RevisionConflictError) as error:
+            raise WorkExecutionError(category="conflict", code="memory_conflict", retryable=True) from error
+        return PreparedWork(
+            result=WorkResult(
+                code="processed" if flushed.processed else "idle",
+                payload=flushed.model_dump(mode="json", exclude_none=True),
+            )
         )
 
 
@@ -436,6 +537,26 @@ class OperationMaintenanceHandler:
         return PreparedWork(result=None, commit=commit)
 
 
+async def memory_work_spec(
+    contexts: RelationalContexts,
+    scope_id: str,
+    /,
+    *,
+    limit: int,
+    max_attempts: int,
+    payload_version: int,
+) -> WorkSpec | None:
+    return await _discover_spec(
+        contexts,
+        scope_id,
+        cursor_name=SOURCE_WINDOW_TRIGGER_NAME,
+        kind=MEMORY_WORK_KIND,
+        limit=limit,
+        max_attempts=max_attempts,
+        payload_version=payload_version,
+    )
+
+
 async def experience_work_spec(
     contexts: RelationalContexts,
     scope_id: str,
@@ -632,6 +753,23 @@ def _require_complete_window(rows, payload: SourceWindowPayload) -> None:
         raise WorkExecutionError(category="retention", code="source_window_unavailable", retryable=False)
 
 
+def _memory_result(
+    payload: SourceWindowPayload,
+    *,
+    current: int,
+    source_count: int,
+    code: str,
+) -> WorkResult:
+    result = MemoryFlushResult(
+        previous_cursor=payload.after,
+        current_cursor=current,
+        high_watermark=payload.high_watermark,
+        source_count=source_count,
+        memory_ref=None,
+    )
+    return WorkResult(code=code, payload=result.model_dump(mode="json", exclude_none=True))
+
+
 def _experience_result(
     payload: SourceWindowPayload,
     *,
@@ -663,9 +801,12 @@ def _digest(value: str) -> str:
 __all__ = [
     "CURRENT_WORK_PAYLOAD_VERSION",
     "EXPERIENCE_WORK_KIND",
+    "MEMORY_WORK_KIND",
     "PROFILE_WORK_KIND",
     "ExperienceWorkDiscoverer",
     "ExperienceWorkHandler",
+    "MemoryWorkDiscoverer",
+    "MemoryWorkHandler",
     "ProfileWorkDiscoverer",
     "ProfileWorkHandler",
     "ProfileWorkPayload",
@@ -673,4 +814,5 @@ __all__ = [
     "SourceWindowPayload",
     "WorkRequester",
     "experience_work_spec",
+    "memory_work_spec",
 ]
