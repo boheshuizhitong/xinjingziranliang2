@@ -1,0 +1,18 @@
+{
+  "name": "seekdb-backend",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "seekdb 混合检索后端 - 接收浏览器端生成的向量，存入 seekdb 并提供 hybridSearch",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.1",
+    "seekdb": "^1.4.0"
+  }
+}
