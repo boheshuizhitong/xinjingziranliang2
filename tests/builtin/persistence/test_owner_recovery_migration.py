@@ -44,7 +44,7 @@ def test_registered_owner_recovery_upgrade_preserves_history_and_revision_checks
     shutil.copytree(current.directory, directory, ignore=shutil.ignore_patterns("__pycache__"))
     manifest_path = directory / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    drop_revision(directory, manifest, "v1_4_1_005", tables=LEDGER_TABLES)
+    drop_revision(directory, manifest, "v1_4_1_006", tables=LEDGER_TABLES)
     drop_revision(directory, manifest, "v1_4_1_004", tables=("pc_access_owner_recovery",))
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     previous = MigrationBundle(directory, embedding_profile=embedding)
@@ -59,8 +59,8 @@ def test_registered_owner_recovery_upgrade_preserves_history_and_revision_checks
     original_evidence = json.loads(old.evidence_path.read_text(encoding="utf-8"))
     upgraded = SQLiteMigrationRunner(database, current, configuration=configuration(embedding))
     plan = upgraded.plan()
-    assert plan.source_revision == "s1402" and plan.revisions == ("v1_4_1_004", "v1_4_1_005")
-    assert apply(upgraded).revision == "v1_4_1_005"
+    assert plan.source_revision == "s1402" and plan.revisions == ("v1_4_1_004", "v1_4_1_006")
+    assert apply(upgraded).revision == "v1_4_1_006"
     assert upgraded.verify().state == "ready"
     assert not apply(upgraded).changed
     evidence = json.loads(upgraded.evidence_path.read_text(encoding="utf-8"))

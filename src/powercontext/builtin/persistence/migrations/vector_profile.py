@@ -85,9 +85,9 @@ class ServerVectorProfile:
             layouts["v1_4_1_004"] = layouts["s1402"] + [
                 ["table", "pc_access_owner_recovery", "pc_access_owner_recovery", owner]
             ]
-        if "v1_4_1_005" in manifest["revision_resources"]:
-            ledger = json.loads((directory / "schemas/sqlite-v1_4_1_005.json").read_text(encoding="utf-8"))["create"]
-            layouts["v1_4_1_005"] = layouts["v1_4_1_004"] + [registry_row(statement) for statement in ledger]
+        if "v1_4_1_006" in manifest["revision_resources"]:
+            ledger = json.loads((directory / "schemas/sqlite-v1_4_1_006.json").read_text(encoding="utf-8"))["create"]
+            layouts["v1_4_1_006"] = layouts["v1_4_1_004"] + [registry_row(statement) for statement in ledger]
         for entries in layouts.values():
             entries.sort(key=lambda row: (row[0], row[1]))
         return layouts

@@ -62,7 +62,7 @@ def previous_bundle(directory, embedding):
     shutil.copytree(current.directory, directory, ignore=shutil.ignore_patterns("__pycache__"))
     manifest_path = directory / "manifest.json"
     manifest = json.loads(manifest_path.read_text())
-    drop_revision(directory, manifest, "v1_4_1_005", tables=LEDGER_TABLES)
+    drop_revision(directory, manifest, "v1_4_1_006", tables=LEDGER_TABLES)
     drop_revision(directory, manifest, "v1_4_1_004", tables=("pc_access_owner_recovery",))
     drop_revision(directory, manifest, "s1402", tables=("pc_portable_restore_receipts",))
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
@@ -108,8 +108,8 @@ def test_registered_s1401_upgrade_preserves_completed_evidence_and_matches_fresh
     upgraded = SQLiteMigrationRunner(database, bundle, configuration=config)
     plan = upgraded.plan()
     assert plan.source_revision == "s1401"
-    assert plan.revisions == ("s1402", "v1_4_1_004", "v1_4_1_005")
-    assert apply(upgraded).revision == "v1_4_1_005"
+    assert plan.revisions == ("s1402", "v1_4_1_004", "v1_4_1_006")
+    assert apply(upgraded).revision == "v1_4_1_006"
     assert upgraded.verify().state == "ready"
     assert not apply(upgraded).changed
     fresh = SQLiteMigrationRunner(tmp_path / "fresh.db", bundle, configuration=config)

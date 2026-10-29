@@ -16,8 +16,8 @@ The design follows [RFC #1771](https://github.com/oceanbase/powercontext/pull/17
 
 The full Server framework registers two installed-release sources for the PowerContext 1.4.1 target (stored compatibility IDs shown below):
 
-- **1.3.0:** `s1300 → s1400 → s1401 → s1402 → v1_4_1_004 → v1_4_1_005`.
-- **1.4.0:** `r1400 → s1400 → s1401 → s1402 → v1_4_1_004 → v1_4_1_005` through a separate frozen source bridge.
+- **1.3.0:** `s1300 → s1400 → s1401 → s1402 → v1_4_1_004 → v1_4_1_006`.
+- **1.4.0:** `r1400 → s1400 → s1401 → s1402 → v1_4_1_004 → v1_4_1_006` through a separate frozen source bridge.
 
 Application release numbers and schema revisions are distinct. The 1.4.0 release is not the `s1400` checkpoint:
 its existing Candidate schema is current, but its Topic attempt storage still needs the registered bridge.
@@ -51,7 +51,7 @@ maintenance for existing managed storage. Runtime startup does not add the recei
 
 Revision `v1_4_1_004` registers `pc_access_owner_recovery` for durable Artifact and Candidate ownership intents. Both installed-release source paths and vector profiles include this table. Existing managed databases require explicit maintenance; fresh databases create the registered empty table. Pending intents retain their original deployment, principal and idempotency identity across Server restarts. Earlier revision resources and checksums remain unchanged. Unregistered database layouts are rejected rather than adopted from a table name alone. This registration does not establish installed-release or external-Provider upgrade acceptance.
 
-Revision `v1_4_1_005` registers the durable Work Ledger and its scheduler coordination tables: `pc_work_lanes`,
+Revision `v1_4_1_006` registers the durable Work Ledger and its scheduler coordination tables: `pc_work_lanes`,
 `pc_work_items`, `pc_work_keys`, `pc_work_attempts`, `pc_scheduler_leases`, `pc_scheduler_scans`,
 `pc_runtime_members`, and the shared `pc_rate_limit_windows`. Ledger execution is at-least-once behind a monotonic
 fence token while its commit is at-most-once, so a retried, superseded or cancelled attempt cannot publish a duplicate
