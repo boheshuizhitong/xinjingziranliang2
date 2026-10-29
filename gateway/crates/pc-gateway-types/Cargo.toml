@@ -1,0 +1,12 @@
+[package]
+name = "pc-gateway-types"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "PowerContext Gateway: check API DTOs, envelope bindings and shared value types"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+bytes = { workspace = true }
+thiserror = { workspace = true }

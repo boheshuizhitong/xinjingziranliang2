@@ -1,0 +1,16 @@
+[package]
+name = "pc-gateway-transport"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "PowerContext Gateway: transport — send admitted bytes, cancel, bounded retry with single owner"
+
+[dependencies]
+pc-gateway-types = { workspace = true }
+pc-gateway-evidence = { workspace = true }
+bytes = { workspace = true }
+futures-core = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+reqwest = { workspace = true }
