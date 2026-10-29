@@ -39,11 +39,12 @@ from powercontext.server.authz import (
     ResourceRef,
 )
 from powercontext.server.authz.models import MemoryEntrySelector
+from powercontext.server.authz.owner_recovery import flush_owner_writes, owner_recovery_session, owner_write_access
 
 if TYPE_CHECKING:
     from powercontext.builtin.runtime import BuiltinRuntime
     from powercontext.server.app import ServerApplication
-    from powercontext.server.authz.owner_recovery import OwnerRecovery
+    from powercontext.server.authz.owner_recovery import OwnerCommit, OwnerRecovery
     from powercontext.server.authz.service import AccessControlService
 
     Application = ServerApplication | BuiltinRuntime
@@ -235,34 +236,51 @@ async def apply_ownership_migration(
                 items.append(item)
             elif existing_owner != owner:
                 conflicts.append(_conflict(item, AccessConflictError(conflict_code)))
+            elif isinstance(item, ArtifactOwnershipGap) and not dry_run:
+                # The relation may have committed before its external audit failed.
+                # Complete the original intent before an idempotent retry succeeds.
+                async with owner_recovery_session(owner_recovery):
+                    await flush_owner_writes(artifact=_owner_identity(item)[1])
     protected = await _owner_recovery_conflicts(owner_recovery, items)
     protected_keys = {_migration_item_key(item.gap) for item in protected}
     items = [item for item in items if _migration_item_key(item) not in protected_keys]
     if dry_run:
-        preview: list[OwnershipDisposition] = []
-        for item in items:
-            if isinstance(item, CandidateOwnershipGap):
-                preview.extend(
-                    OwnershipDisposition(
-                        gap=ArtifactOwnershipGap(
-                            scope_id=item.scope_id,
-                            family=item.family,
-                            artifact_id=item.target_artifact_id or "",
-                            entry_id=entry_id,
-                        ),
-                        outcome="applied",
-                    )
-                    for entry_id in item.entry_ids
-                )
-            preview.append(OwnershipDisposition(gap=item, outcome="applied"))
-        return OwnershipMigrationResult(applied=tuple(preview), conflicts=(*conflicts, *protected))
+        return OwnershipMigrationResult(applied=_preview_gaps(items), conflicts=(*conflicts, *protected))
     applied: list[OwnershipDisposition] = []
     conflicts.extend(protected)
     for item in items:
-        item_applied, item_conflicts = await _apply_gap(access, item, owner, context)
+        if owner_recovery is None:
+            item_applied, item_conflicts = await _apply_gap(access, item, owner, context)
+        else:
+            async with (
+                owner_recovery_session(owner_recovery),
+                owner_recovery.database.transaction() as connection,
+            ):
+                writer = owner_write_access(access, connection)
+                item_applied, item_conflicts = await _apply_gap(writer, item, owner, context)
         applied.extend(item_applied)
         conflicts.extend(item_conflicts)
     return OwnershipMigrationResult(applied=tuple(applied), conflicts=tuple(conflicts))
+
+
+def _preview_gaps(items: Sequence[ArtifactOwnershipGap | CandidateOwnershipGap]) -> tuple[OwnershipDisposition, ...]:
+    preview: list[OwnershipDisposition] = []
+    for item in items:
+        if isinstance(item, CandidateOwnershipGap):
+            preview.extend(
+                OwnershipDisposition(
+                    gap=ArtifactOwnershipGap(
+                        scope_id=item.scope_id,
+                        family=item.family,
+                        artifact_id=item.target_artifact_id or "",
+                        entry_id=entry_id,
+                    ),
+                    outcome="applied",
+                )
+                for entry_id in item.entry_ids
+            )
+        preview.append(OwnershipDisposition(gap=item, outcome="applied"))
+    return tuple(preview)
 
 
 async def _owner_recovery_conflicts(
@@ -306,7 +324,7 @@ def _migration_item_key(item: ArtifactOwnershipGap | CandidateOwnershipGap) -> t
 
 
 async def _apply_gap(
-    access: AccessControlService,
+    access: AccessControlService | OwnerCommit,
     item: ArtifactOwnershipGap | CandidateOwnershipGap,
     owner: PrincipalRef,
     context: AccessAuditContext,
@@ -424,7 +442,7 @@ async def _candidate_gaps(
 
 
 async def _attest_gap_owner(
-    access: AccessControlService,
+    access: AccessControlService | OwnerCommit,
     gap: CandidateOwnershipGap,
     owner: PrincipalRef,
 ) -> None:

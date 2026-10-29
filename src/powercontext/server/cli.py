@@ -51,6 +51,7 @@ from powercontext.server import database_migration
 from powercontext.server.app import access_readiness_checks
 from powercontext.server.authz import PrincipalRef
 from powercontext.server.authz.composition import open_builtin_access_control
+from powercontext.server.authz.owner_recovery import OwnerRecovery
 from powercontext.server.background_metrics import serve_background_metrics
 from powercontext.server.configuration import (
     ServerConfigurationError,
@@ -595,6 +596,8 @@ async def _access_ownership_maintenance(
         runtime = await resources.enter_async_context(open_builtin_runtime(config))
         if runtime.scopes is None:
             raise typer.BadParameter("ownership migration requires a runtime with Scope support")  # noqa: TRY003
+        recovery = OwnerRecovery(runtime.primary_database, access)
+        await recovery.initialize()
         scopes = list(scope_ids) or [scope.scope_id for scope in await runtime.scopes.list()]
         if action == "plan":
             plan = await plan_ownership_migration(
@@ -613,6 +616,7 @@ async def _access_ownership_maintenance(
             scopes,
             owner=PrincipalRef(type=owner_type, id=owner_id),
             transport="background",
+            owner_recovery=recovery,
         )
         report = ownership_report(result)
         typer.echo(json.dumps(report))
