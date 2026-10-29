@@ -447,6 +447,41 @@ test.each(["en", "zh"] as const)(
     expect(desktopApi.remember).toHaveBeenCalledTimes(1);
   },
 );
+test("leaving a cleared unknown-write form explicitly discards retained input without clearing the receipt", async () => {
+  const user = userEvent.setup();
+  vi.mocked(desktopApi.state).mockResolvedValue(state);
+  render(<App />);
+  await user.click(screen.getByRole("button", { name: "记忆" }));
+  const unknown = outcome("unknown");
+  vi.mocked(desktopApi.remember).mockResolvedValueOnce(unknown);
+  vi.mocked(desktopApi.state).mockResolvedValue({
+    ...state,
+    lastWrite: unknown.record,
+  });
+  await user.type(
+    screen.getByLabelText("记忆内容"),
+    "uncertain submitted input",
+  );
+  await user.click(screen.getByRole("button", { name: "保存" }));
+  await screen.findAllByText(/提交结果未知。/);
+  await user.clear(screen.getByLabelText("记忆内容"));
+  await user.click(screen.getByRole("button", { name: "连接" }));
+  await answerConfirmation(user, false);
+  expect(screen.getByRole("heading", { level: 1, name: "记忆" })).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "连接" }));
+  await answerConfirmation(user, true);
+  expect(await screen.findByLabelText("连接名称")).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "记忆" }));
+  expect(screen.queryByRole("alertdialog")).toBeNull();
+  await user.type(screen.getByLabelText("记忆内容"), "next explicit write");
+  await user.click(screen.getByRole("button", { name: "保存" }));
+  expect(screen.getByRole("alertdialog").textContent).toContain(
+    "再次保存可能产生重复记录",
+  );
+  await answerConfirmation(user, false);
+  expect(desktopApi.remember).toHaveBeenCalledTimes(1);
+});
+
 function form(language: "en" | "zh" = "en") {
   vi.mocked(desktopApi.state).mockResolvedValue(state);
   render(
