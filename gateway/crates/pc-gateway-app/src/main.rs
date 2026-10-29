@@ -43,6 +43,8 @@ pub struct AppState {
     pub inject_context: bool,
     /// 过检后同步沉淀对话（默认关）。
     pub sediment: bool,
+    /// 默认 Scope（启动时读一次，避免热路径读环境变量）。
+    pub default_scope: String,
 }
 
 #[tokio::main]
@@ -99,6 +101,8 @@ async fn main() {
         degrade,
         inject_context: matches!(std::env::var("PC_GATEWAY_INJECTION").as_deref(), Ok("on")),
         sediment: matches!(std::env::var("PC_GATEWAY_SEDIMENT").as_deref(), Ok("on")),
+        default_scope: std::env::var("PC_GATEWAY_DEFAULT_SCOPE")
+            .unwrap_or_else(|_| "gateway:default".into()),
     });
 
     let router = Router::new()

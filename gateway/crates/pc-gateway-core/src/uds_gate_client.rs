@@ -185,15 +185,10 @@ async fn read_response(rd: &mut ReadHalf<UnixStream>) -> Result<(u16, Vec<u8>, b
         if buf.len() > MAX_HEADER_BYTES {
             return Err(GateError::Malformed("uds header too large".into()));
         }
-        let mut chunk = [0u8; 4096];
-        let n = tokio::time::timeout(READ_TIMEOUT, rd.read(&mut chunk))
-            .await
-            .map_err(|_| GateError::GateUnavailable("uds read timeout".into()))?
-            .map_err(|e| GateError::GateUnavailable(format!("uds read: {e}")))?;
+        let n = read_with_timeout(rd, &mut buf, 4096).await?;
         if n == 0 {
             return Err(GateError::Malformed("uds closed before headers".into()));
         }
-        buf.extend_from_slice(&chunk[..n]);
     };
 
     let head = String::from_utf8_lossy(&buf[..header_end]).into_owned();
@@ -256,15 +251,10 @@ async fn read_more(
     target: usize,
 ) -> Result<(), GateError> {
     while buf.len() < target {
-        let mut chunk = [0u8; 8192];
-        let n = tokio::time::timeout(READ_TIMEOUT, rd.read(&mut chunk))
-            .await
-            .map_err(|_| GateError::GateUnavailable("uds read timeout".into()))?
-            .map_err(|e| GateError::GateUnavailable(format!("uds read: {e}")))?;
+        let n = read_with_timeout(rd, buf, 8192).await?;
         if n == 0 {
             return Err(GateError::Malformed("uds closed mid-body".into()));
         }
-        buf.extend_from_slice(&chunk[..n]);
     }
     Ok(())
 }
@@ -281,15 +271,10 @@ async fn read_chunked(
             if let Some(pos) = buf.windows(2).position(|w| w == b"\r\n") {
                 break pos;
             }
-            let mut chunk = [0u8; 4096];
-            let n = tokio::time::timeout(READ_TIMEOUT, rd.read(&mut chunk))
-                .await
-                .map_err(|_| GateError::GateUnavailable("uds read timeout".into()))?
-                .map_err(|e| GateError::GateUnavailable(format!("uds read: {e}")))?;
+            let n = read_with_timeout(rd, buf, 4096).await?;
             if n == 0 {
                 return Err(GateError::Malformed("uds closed mid-chunk".into()));
             }
-            buf.extend_from_slice(&chunk[..n]);
         };
         let size_str = String::from_utf8_lossy(&buf[..line_end]).into_owned();
         buf.drain(..line_end + 2);
@@ -306,26 +291,18 @@ async fn read_chunked(
                     }
                     continue; // trailer 头部行
                 }
-                let mut chunk = [0u8; 1024];
-                let n = match tokio::time::timeout(READ_TIMEOUT, rd.read(&mut chunk)).await {
-                    Ok(Ok(0)) => return Ok((out, false)),
-                    Ok(Ok(n)) => n,
-                    Ok(Err(_)) | Err(_) => return Ok((out, false)),
+                match read_with_timeout(rd, buf, 1024).await {
+                    Ok(0) | Err(_) => return Ok((out, false)),
+                    Ok(_) => {}
                 };
-                buf.extend_from_slice(&chunk[..n]);
             }
         }
         let needed = size + 2; // 数据 + CRLF
         while buf.len() < needed {
-            let mut chunk = [0u8; 8192];
-            let n = tokio::time::timeout(READ_TIMEOUT, rd.read(&mut chunk))
-                .await
-                .map_err(|_| GateError::GateUnavailable("uds read timeout".into()))?
-                .map_err(|e| GateError::GateUnavailable(format!("uds read: {e}")))?;
+            let n = read_with_timeout(rd, buf, 8192).await?;
             if n == 0 {
                 return Err(GateError::Malformed("uds closed mid-chunk-data".into()));
             }
-            buf.extend_from_slice(&chunk[..n]);
         }
         out.extend_from_slice(&buf[..size]);
         buf.drain(..needed);
@@ -345,6 +322,21 @@ fn retryable(e: &GateError) -> bool {
     }
 }
 
+/// 超时读取一块数据追加到 buf，返回读取字节数（0 = 对端关闭）。
+async fn read_with_timeout(
+    rd: &mut ReadHalf<UnixStream>,
+    buf: &mut Vec<u8>,
+    chunk_size: usize,
+) -> Result<usize, GateError> {
+    let mut chunk = vec![0u8; chunk_size];
+    let n = tokio::time::timeout(READ_TIMEOUT, rd.read(&mut chunk))
+        .await
+        .map_err(|_| GateError::GateUnavailable("uds read timeout".into()))?
+        .map_err(|e| GateError::GateUnavailable(format!("uds read: {e}")))?;
+    buf.extend_from_slice(&chunk[..n]);
+    Ok(n)
+}
+
 fn find_terminator(buf: &[u8]) -> Option<usize> {
     buf.windows(4).position(|w| w == b"\r\n\r\n")
 }
@@ -354,7 +346,7 @@ impl GateClient for UdsGateClient {
         &self,
         request: ContextCheckRequest,
     ) -> Result<ContextCheckResult, GateError> {
-        let body = serde_json::to_vec(&request).unwrap_or_default();
+        let body = serde_json::to_vec(&request).expect("serialize gate request");
         let this = self.clone();
         {
             let (status, body) = this.request("POST", "/v1/context/check", Some(&body)).await?;
@@ -382,7 +374,7 @@ impl GateClient for UdsGateClient {
         &self,
         request: PrepareContextRequest,
     ) -> Result<PrepareContextResult, GateError> {
-        let body = serde_json::to_vec(&request).unwrap_or_default();
+        let body = serde_json::to_vec(&request).expect("serialize gate request");
         let this = self.clone();
         {
             let (status, body) = this.request("POST", "/v1/context/prepare", Some(&body)).await?;
@@ -398,7 +390,7 @@ impl GateClient for UdsGateClient {
         &self,
         request: CaptureContentSourceRequest,
     ) -> Result<serde_json::Value, GateError> {
-        let body = serde_json::to_vec(&request).unwrap_or_default();
+        let body = serde_json::to_vec(&request).expect("serialize gate request");
         let this = self.clone();
         {
             let (status, body) = this.request("POST", "/v1/sources/content", Some(&body)).await?;

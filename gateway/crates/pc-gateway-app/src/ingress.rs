@@ -12,9 +12,6 @@ use pc_gateway_protocol::{CanonicalMessage, CanonicalRequest, OutputLimits, Role
 use serde::Deserialize;
 use std::sync::Arc;
 
-/// 网关密钥对应的默认 Scope（完整形态应从密钥解析出 Scope/profile 绑定）。
-const DEFAULT_SCOPE_ENV: &str = "PC_GATEWAY_DEFAULT_SCOPE";
-
 #[derive(Debug, Deserialize)]
 struct OpenAiChatRequest {
     model: String,
@@ -153,7 +150,7 @@ async fn ingress_common(
     };
 
     let call = ManagedCall {
-        scope_id: std::env::var(DEFAULT_SCOPE_ENV).unwrap_or_else(|_| "gateway:default".into()),
+        scope_id: state.default_scope.clone(),
         target_profile: state.upstream_profile.clone(),
         request: canonical,
         target_url: match format {

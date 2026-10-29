@@ -104,9 +104,19 @@ where
                 }
             }
         };
+        // 送检内容必须与发送字节严格一致：拒绝有损转换（防“检查≠发送”缝隙）。
+        // 渲染器输出本应恒为合法 UTF-8，非法即契约违约，阻断而非降级。
+        let payload_body = match String::from_utf8(payload.bytes.clone().to_vec()) {
+            Ok(text) => text,
+            Err(_) => {
+                return ManagedOutcome::Blocked {
+                    reason_codes: vec!["invalid_payload_encoding".into()],
+                }
+            }
+        };
         let model_payload = ModelJsonPayload::new(
             content_headers(&call.headers, payload.content_type),
-            String::from_utf8_lossy(&payload.bytes).into_owned(),
+            payload_body,
         );
 
         let check = ContextCheckRequest::BeforeSend {
@@ -118,11 +128,14 @@ where
 
         let binding = match self.gate.check(check).await {
             Err(e) => {
-                return match (classify_gate_error(e), call.degrade_policy) {
-                    (_, DegradePolicy::PassthroughWithoutMemory) => {
-                        self.degraded_send(&call, payload.bytes, evidence).await
-                    }
-                    (msg, DegradePolicy::Pause) => ManagedOutcome::GatePaused(msg),
+                // #2199 语义：降级仅适用于 Core「不可用」。Malformed 表示 Core 可达但
+                // 响应异常（版本错乱/被篡改/代理污染）——恰恰最不该绕过检查，一律暂停。
+                return match (e, call.degrade_policy) {
+                    (
+                        GateError::GateUnavailable(_),
+                        DegradePolicy::PassthroughWithoutMemory,
+                    ) => self.degraded_send(&call, payload.bytes, evidence).await,
+                    (e, _) => ManagedOutcome::GatePaused(classify_gate_error(e)),
                 }
             }
             Ok(result) => match result.decision {
@@ -161,6 +174,16 @@ where
         };
 
         // strict：完整原始响应先过 before_release，通过前不释放任何内容。
+        // 上游响应不受我们控制：非 UTF-8 字节不做有损转换送检（那会导致
+        // “批准的是替换后文本、交付的是原始字节”的保真缺口），直接不放行。
+        let release_body = match String::from_utf8(raw.body.clone().to_vec()) {
+            Ok(text) => text,
+            Err(_) => {
+                return ManagedOutcome::Withheld {
+                    reason_codes: vec!["invalid_response_encoding".into()],
+                }
+            }
+        };
         let release_check = ContextCheckRequest::BeforeRelease {
             scope_id: call.scope_id.clone(),
             target_profile: call.target_profile.clone(),
@@ -168,7 +191,7 @@ where
             payload: ModelJsonPayload::new(
                 // 契约要求 headers 至少 1 项；携带上游实际 Content-Type。
                 BTreeMap::from([("content-type".to_string(), raw.content_type.clone())]),
-                String::from_utf8_lossy(&raw.body).into_owned(),
+                release_body.clone(),
             ),
             completion: pc_gateway_types::CONTEXT_CHECK_COMPLETION.into(),
         };
@@ -187,12 +210,12 @@ where
                                     [serde_json::Value::String(s)] => Some(s.clone()),
                                     _ => None,
                                 }).unwrap_or_default(),
-                            "assistant": String::from_utf8_lossy(&raw.body),
+                            "assistant": release_body.clone(),
                             "model": call.request.model,
                         });
                         let digest = result.binding.as_deref()
                             .map(simple_digest)
-                            .unwrap_or_else(|| simple_digest(&String::from_utf8_lossy(&raw.body)));
+                            .unwrap_or_else(|| simple_digest(&release_body));
                         let capture = CaptureContentSourceRequest {
                             scope_id: call.scope_id.clone(),
                             source_id: format!("gw-turn-{digest}"),

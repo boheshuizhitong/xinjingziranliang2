@@ -644,3 +644,52 @@ async fn blocked_turn_never_sediments() {
     executor.run(c, &RendererRef(renderer.clone()), &NoopEvidenceSink).await;
     assert!(gate.captured.lock().unwrap().is_empty(), "被拦内容不得沉淀");
 }
+
+#[tokio::test]
+async fn malformed_gate_never_degrades_even_with_passthrough() {
+    // Core 可达但返回畸形响应：不是"不可用"，绝不允许降级直通（fail-closed）。
+    let (executor, renderer, transport, _g) = harness(
+        vec![Err(GateError::Malformed("garbage response".into()))],
+        vec![raw_response()],
+        2,
+    );
+    let outcome = executor
+        .run(
+            call(DegradePolicy::PassthroughWithoutMemory),
+            &RendererRef(renderer.clone()),
+            &NoopEvidenceSink,
+        )
+        .await;
+    assert!(matches!(outcome, ManagedOutcome::GatePaused(_)), "Malformed 必须暂停");
+    assert_eq!(transport.sends.lock().unwrap().len(), 0, "零发送");
+}
+
+#[tokio::test]
+async fn non_utf8_response_is_never_released() {
+    // 上游返回非法 UTF-8 字节：不做有损转换送检（保真缺口），直接不放行。
+    let bad = SendOutcome::Delivered(pc_gateway_transport::RawResponse {
+        status: 200,
+        body: bytes::Bytes::from_static(b"{\"text\":\"\xff\xfe\"}"), // 非法 UTF-8
+        content_type: "application/json".into(),
+        ttft_ms: None,
+        usage: None,
+    });
+    let (executor, renderer, transport, gate) = harness(
+        vec![Ok(result(CheckPhase::BeforeSend, CheckDecision::Allow, &[]))],
+        vec![bad],
+        2,
+    );
+    let outcome = executor
+        .run(call(DegradePolicy::Pause), &RendererRef(renderer.clone()), &NoopEvidenceSink)
+        .await;
+    match outcome {
+        ManagedOutcome::Withheld { reason_codes } => {
+            assert_eq!(reason_codes, ["invalid_response_encoding"])
+        }
+        other => panic!("expected Withheld, got {other:?}"),
+    }
+    // 只有一次检查（before_send）；非法响应根本不送检、不释放。
+    // cancel 不适用：非流式调用响应已完整到达，无进行中的上游工作可取消。
+    assert_eq!(gate.seen.lock().unwrap().len(), 1);
+    assert_eq!(*transport.cancels.lock().unwrap(), 0);
+}
