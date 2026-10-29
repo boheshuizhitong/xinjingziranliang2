@@ -83,12 +83,14 @@ def test_selected_scopes_have_a_complete_terminal_result_contract():
 
 
 def test_automatic_host_workflows_share_one_scope_and_admission_gate():
+    assert workflow("master.yml")["on"]["push"]["branches"] == ["master"]
+    assert workflow("master.yml")["on"]["pull_request"]["branches"] == ["master"]
     main = workflow("master.yml")["jobs"]
     for path in (ROOT / ".github/workflows").glob("*.yml"):
         if path.name != "master.yml":
             events = workflow(path.name)["on"]
             assert "pull_request" not in events, path.name
-            assert not {"master", "main"} & set(events.get("push", {}).get("branches", [])), path.name
+            assert "master" not in events.get("push", {}).get("branches", []), path.name
     for job in main.values():
         if (
             not job.get("uses", "").endswith(".yml")
@@ -101,7 +103,6 @@ def test_automatic_host_workflows_share_one_scope_and_admission_gate():
         assert "pull_request" not in child["on"]
         assert "schedule" not in child["on"]
         assert "master" not in child["on"].get("push", {}).get("branches", [])
-        assert "main" not in child["on"].get("push", {}).get("branches", [])
         assert job["with"]["suites"] == "${{ needs.changes.outputs.suites }}"
         assert {"changes", "quality", "tests"} <= set(job["needs"])
         assert "needs.quality.result == 'success'" in job["if"]

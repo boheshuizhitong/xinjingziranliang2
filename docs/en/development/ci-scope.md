@@ -1,10 +1,10 @@
 # GitHub CI design and operation
 
-CI must validate affected behavior while controlling duplicate work, wasted work and bursts of runner demand. The upstream default branch is `master`; a `main` mirror also receives trunk validation. Workflow policy, path ownership and required outcomes are reviewed with code. Release acceptance remains independent.
+CI must validate affected behavior while controlling duplicate work, wasted work and bursts of runner demand. The upstream trunk branch is `master`, and automatic trunk validation listens only to that branch. Workflow policy, path ownership and required outcomes are reviewed with code. Release acceptance remains independent.
 
 ## Entry points and admission
 
-Ordinary PRs and trunk pushes start only `Main`. It selects the complete change scope once and calls existing reusable workflows. Called workflows reuse this selection without allocating another detector runner. The Desktop `codex/desktop-preview` branch and workflow-specific manual diagnostics retain independent entry points.
+Ordinary PRs targeting `master` and pushes to `master` start only `Main`. It selects the complete change scope once and calls existing reusable workflows. Called workflows reuse this selection without allocating another detector runner. The Desktop `codex/desktop-preview` branch and workflow-specific manual diagnostics retain independent entry points.
 
 ```mermaid
 flowchart TD
@@ -34,7 +34,7 @@ Draft PRs allocate no automatic CI runners. Marking a PR ready validates its com
 | Ordinary ready PR | 3.11/3.14 unit tests and 3.12 E2E: 3 combinations | Complete selected backend, upgrade, installation-role, platform and host acceptance |
 | PR changes dependencies, shared fixtures, CI policy or unclassified files | 3.11–3.14 × unit/E2E: 8 combinations | Conservative affected or full selection |
 | PR update/reopen already carrying `ci:full` | 8 combinations | Complete PR scope, without forcing unrelated diagnostics |
-| `master`/`main` push | 8 combinations | Compare with a successful trunk baseline, retaining unverified changes |
+| `master` push | 8 combinations | Compare with a successful trunk baseline, retaining unverified changes |
 | Daily at 20:17 UTC | 8 combinations | Full ordinary acceptance, excluding historical schema generation and lock experiments |
 | Manual Main | 8 combinations | Full scope; upgrade selection defaults to `full`, with an explicit diagnostic subset available |
 | Published release | Independent installed-package and publication checks | Complete upgrade evidence and validated publication bytes; PR scope cannot bypass acceptance |
