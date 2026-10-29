@@ -890,7 +890,7 @@ async def open_builtin_runtime(
             _open_artifact_processing_supervisor(
                 config,
                 contexts,
-                processing_bindings,
+                _supervisor_bindings(config, processing_bindings),
                 tracing=tracing,
                 recovery=_archive_recovery,
                 processing_observer=processing_observer,
@@ -1143,15 +1143,60 @@ class WorkBackground:
 
 
 def _work_background_requested(config: BuiltinConfig) -> bool:
-    """True when this deployment asked for ledger-driven background execution."""
+    """True when this deployment opted into ledger-driven background execution.
 
+    The ledger and the APScheduler-driven artifact supervisors both drive the
+    same source windows, so exactly one of them may own a Family. RFC 1430 makes
+    that ordering explicit: a bridge release moves ``single_node/all`` onto the
+    ledger only once the APScheduler path has fully retired. Until then a
+    ``single_node`` install keeps the supervisors it already has, and the ledger
+    starts only for an explicit ``distributed`` deployment, where the roles are
+    split across processes and no single process can own every window.
+    """
+
+    return config.deployment.mode == "distributed"
+
+
+def _ledger_families(config: BuiltinConfig) -> frozenset[str]:
+    """Families the durable Work Ledger drives, or empty when it is inactive.
+
+    The supervisor must skip these Families, otherwise both paths claim the same
+    window: the ledger advances the cursor and the supervisor's next tick sees an
+    empty window and records a noop instead of doing the work.
+    """
+
+    if not _work_background_requested(config):
+        return frozenset()
     runtime = config.runtime
-    return (
-        config.deployment.mode == "distributed"
-        or runtime.memory_schedule_seconds is not None
-        or runtime.experience_schedule_seconds is not None
-        or runtime.profile_schedule_enabled
-    )
+    families = set()
+    if runtime.memory_schedule_seconds is not None:
+        families.add("memory")
+    if runtime.experience_schedule_seconds is not None:
+        families.add("experience")
+    if runtime.profile_schedule_enabled:
+        families.add("profile")
+    return frozenset(families)
+
+
+def _work_role_components(role: str) -> tuple[bool, bool]:
+    """Report which ledger components a deployment role runs: (scheduler, worker).
+
+    ``api`` serves requests only, ``scheduler`` only discovers work, ``worker``
+    only claims it, and ``all`` does both.
+    """
+
+    return role in ("all", "scheduler"), role in ("all", "worker")
+
+
+def _supervisor_bindings(
+    config: BuiltinConfig, bindings: Sequence[ArtifactProcessingBinding]
+) -> tuple[ArtifactProcessingBinding, ...]:
+    """Drop the Families the ledger owns so the two paths never share a window."""
+
+    owned = _ledger_families(config)
+    if not owned:
+        return tuple(bindings)
+    return tuple(binding for binding in bindings if binding.artifact_family not in owned)
 
 
 def _work_discoverers(config: BuiltinConfig, contexts: RelationalContexts) -> tuple[Any, ...]:
@@ -1246,10 +1291,13 @@ async def _open_work_background(
 ) -> AsyncIterator[WorkBackground]:
     """Start the durable Work Ledger components this role is responsible for.
 
-    A single-node deployment keeps every role in one process and only starts the
-    ledger when a background schedule is configured, so an unconfigured install
-    behaves exactly as before. A distributed deployment splits the roles and the
-    API process never claims or scans work.
+    The ledger drives Families that a supervisor no longer owns, so it is opened
+    only for an explicit ``distributed`` deployment (see
+    ``_work_background_requested``). A ``single_node`` install keeps its
+    APScheduler supervisors and only gets the ``OperationManager`` facade, which
+    is what an unconfigured install has always exposed. A distributed deployment
+    splits the roles: ``api`` never claims or scans work, ``scheduler`` only
+    scans, ``worker`` only claims, and ``all`` does both.
     """
 
     from powercontext.builtin.runtime.durable_scheduler import DurableScheduler
@@ -1271,6 +1319,7 @@ async def _open_work_background(
         return
 
     role = config.deployment.role
+    runs_scheduler, runs_worker = _work_role_components(role)
     async with AsyncExitStack() as stack:
         membership = RuntimeMembership(
             database=contexts.database,
@@ -1288,7 +1337,7 @@ async def _open_work_background(
                 config=config.coordination,
                 tracing=tracing,
             )
-            if role in ("all", "scheduler")
+            if runs_scheduler
             else None
         )
         worker = (
@@ -1299,7 +1348,7 @@ async def _open_work_background(
                 config=config.worker,
                 tracing=tracing,
             )
-            if role in ("all", "worker")
+            if runs_worker
             else None
         )
         components = [component for component in (membership, scheduler, worker) if component is not None]
