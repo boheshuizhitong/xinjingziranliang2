@@ -88,10 +88,8 @@ impl GateClient for FakeGate {
         async move { step.expect("gate script exhausted") }
     }
 
-    fn capabilities(
-        &self,
-    ) -> impl Future<Output = Result<serde_json::Value, GateError>> + Send {
-        async move { Ok(serde_json::json!({ "enforcing": false })) }
+    async fn capabilities(&self) -> Result<serde_json::Value, GateError> {
+        Ok(serde_json::json!({ "enforcing": false }))
     }
 
     fn prepare(
@@ -109,12 +107,12 @@ impl GateClient for FakeGate {
         async move { step }
     }
 
-    fn capture(
+    async fn capture(
         &self,
         request: CaptureContentSourceRequest,
-    ) -> impl Future<Output = Result<serde_json::Value, GateError>> + Send {
+    ) -> Result<serde_json::Value, GateError> {
         self.captured.lock().unwrap().push((request.source_id, request.content));
-        async move { Ok(serde_json::json!({"captured": true})) }
+        Ok(serde_json::json!({"captured": true}))
     }
 }
 
@@ -138,9 +136,8 @@ impl Transport for FakeTransport {
         }
     }
 
-    fn cancel<'a>(&'a self, _send: &'a AdmittedSend) -> impl Future<Output = ()> + Send + 'a {
+    async fn cancel(&self, _send: &AdmittedSend) {
         *self.cancels.lock().unwrap() += 1;
-        async {}
     }
 }
 
@@ -222,8 +219,8 @@ impl Transport for TransportRef {
     ) -> impl Future<Output = SendOutcome> + Send + 'a {
         Transport::send(&*self.0, send)
     }
-    fn cancel<'a>(&'a self, send: &'a AdmittedSend) -> impl Future<Output = ()> + Send + 'a {
-        Transport::cancel(&*self.0, send)
+    async fn cancel(&self, send: &AdmittedSend) {
+        Transport::cancel(&*self.0, send).await
     }
 }
 
@@ -559,7 +556,7 @@ async fn injects_block_and_declares_exact_location() {
     assert_eq!(loc.location.schema, "powercontext.model-json-text-location.v1");
     assert_eq!(loc.location.start_byte, 0);
     let block = "BEGIN_POWERCONTEXT_PREPARED_CONTEXT_V1\n{\"items\":[{\"content\":\"网关必须无策略\"}]}\nEND_POWERCONTEXT_PREPARED_CONTEXT_V1";
-    assert_eq!(loc.location.end_byte as usize, block.as_bytes().len());
+    assert_eq!(loc.location.end_byte as usize, block.len());
     assert_eq!(transport.sends.lock().unwrap().len(), 1);
 }
 

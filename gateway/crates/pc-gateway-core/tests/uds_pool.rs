@@ -3,11 +3,10 @@
 
 use pc_gateway_core::{GateClient, UdsGateClient};
 use pc_gateway_types::{
-    CheckDecision, CheckPhase, ContextCheckRequest, ContextCheckResult, ModelJsonPayload,
+    CheckDecision, CheckPhase, ContextCheckRequest, ModelJsonPayload,
 };
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
 
@@ -44,7 +43,7 @@ async fn read_request(conn: &mut UnixStream) {
     let head = String::from_utf8_lossy(&buf).to_string();
     if let Some(len) = head
         .lines()
-        .find_map(|l| l.strip_prefix("Content-Length: ").map(|v| v.trim().parse::<usize>().ok()).flatten())
+        .find_map(|l| l.strip_prefix("Content-Length: ").and_then(|v| v.trim().parse::<usize>().ok()))
     {
         let mut body = vec![0u8; len];
         if len > 0 {

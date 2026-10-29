@@ -5,7 +5,6 @@ use pc_gateway_types::{
     CaptureContentSourceRequest, ContextCheckRequest, ContextCheckResult, PrepareContextRequest,
     PrepareContextResult,
 };
-use std::future::Future;
 
 pub enum CoreLink {
     Uds(UdsGateClient),
@@ -27,48 +26,40 @@ impl CoreLink {
 }
 
 impl GateClient for CoreLink {
-    fn check(
+    async fn check(
         &self,
         request: ContextCheckRequest,
-    ) -> impl Future<Output = Result<ContextCheckResult, GateError>> + Send {
-        async move {
-            match self {
-                CoreLink::Uds(c) => c.check(request).await,
-                CoreLink::Http(c) => c.check(request).await,
-            }
+    ) -> Result<ContextCheckResult, GateError> {
+        match self {
+            CoreLink::Uds(c) => c.check(request).await,
+            CoreLink::Http(c) => c.check(request).await,
         }
     }
 
-    fn capabilities(&self) -> impl Future<Output = Result<serde_json::Value, GateError>> + Send {
-        async move {
-            match self {
-                CoreLink::Uds(c) => c.capabilities().await,
-                CoreLink::Http(c) => c.capabilities().await,
-            }
+    async fn capabilities(&self) -> Result<serde_json::Value, GateError> {
+        match self {
+            CoreLink::Uds(c) => c.capabilities().await,
+            CoreLink::Http(c) => c.capabilities().await,
         }
     }
 
-    fn prepare(
+    async fn prepare(
         &self,
         request: PrepareContextRequest,
-    ) -> impl Future<Output = Result<PrepareContextResult, GateError>> + Send {
-        async move {
-            match self {
-                CoreLink::Uds(c) => c.prepare(request).await,
-                CoreLink::Http(c) => c.prepare(request).await,
-            }
+    ) -> Result<PrepareContextResult, GateError> {
+        match self {
+            CoreLink::Uds(c) => c.prepare(request).await,
+            CoreLink::Http(c) => c.prepare(request).await,
         }
     }
 
-    fn capture(
+    async fn capture(
         &self,
         request: CaptureContentSourceRequest,
-    ) -> impl Future<Output = Result<serde_json::Value, GateError>> + Send {
-        async move {
-            match self {
-                CoreLink::Uds(c) => c.capture(request).await,
-                CoreLink::Http(c) => c.capture(request).await,
-            }
+    ) -> Result<serde_json::Value, GateError> {
+        match self {
+            CoreLink::Uds(c) => c.capture(request).await,
+            CoreLink::Http(c) => c.capture(request).await,
         }
     }
 }

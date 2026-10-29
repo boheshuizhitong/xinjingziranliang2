@@ -128,7 +128,7 @@ impl Transport for ReqwestTransport {
                         let usage = extract_usage(&body);
                         SendOutcome::Delivered(RawResponse {
                             status,
-                            body: Bytes::from(body),
+                            body,
                             content_type,
                             ttft_ms: None,
                             usage,
@@ -142,7 +142,7 @@ impl Transport for ReqwestTransport {
     fn cancel<'a>(&'a self, _send: &'a AdmittedSend) -> impl Future<Output = ()> + Send + 'a {
         // 非流式/全量缓冲调用在响应完整返回后已无进行中的上游工作；
         // 放弃响应体即断开连接（连接池按目标隔离）。
-        async {}
+        std::future::ready(())
     }
 }
 

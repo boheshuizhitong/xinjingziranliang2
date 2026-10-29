@@ -5,7 +5,6 @@ use pc_gateway_types::{
 };
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use std::future::Future;
 
 /// 独立部署形态：HTTPS/TCP 直连 PowerContext Server 的公开契约。
 /// 同机组合部署用 `UdsGateClient`（HTTP over Unix Domain Socket）。
@@ -62,49 +61,45 @@ impl HttpGateClient {
 }
 
 impl GateClient for HttpGateClient {
-    fn check(
+    async fn check(
         &self,
         request: ContextCheckRequest,
-    ) -> impl Future<Output = Result<ContextCheckResult, GateError>> + Send {
-        async move { self.post("/v1/context/check", &request).await }
+    ) -> Result<ContextCheckResult, GateError> {
+        self.post("/v1/context/check", &request).await
     }
 
-    fn capabilities(
-        &self,
-    ) -> impl Future<Output = Result<serde_json::Value, GateError>> + Send {
-        async move {
-            let url = format!("{}/v1/capabilities", self.base_url);
-            let resp = self
-                .client
-                .get(&url)
-                .header("x-powercontext-scope-mode", "current")
-                .bearer_auth(self.token.clone().unwrap_or_default())
-                .send()
-                .await
-                .map_err(|e| GateError::GateUnavailable(e.to_string()))?;
-            let status = resp.status();
-            if !status.is_success() {
-                return Err(GateError::GateUnavailable(format!(
-                    "capabilities HTTP {status}"
-                )));
-            }
-            resp.json()
-                .await
-                .map_err(|e| GateError::Malformed(e.to_string()))
+    async fn capabilities(&self) -> Result<serde_json::Value, GateError> {
+        let url = format!("{}/v1/capabilities", self.base_url);
+        let resp = self
+            .client
+            .get(&url)
+            .header("x-powercontext-scope-mode", "current")
+            .bearer_auth(self.token.clone().unwrap_or_default())
+            .send()
+            .await
+            .map_err(|e| GateError::GateUnavailable(e.to_string()))?;
+        let status = resp.status();
+        if !status.is_success() {
+            return Err(GateError::GateUnavailable(format!(
+                "capabilities HTTP {status}"
+            )));
         }
+        resp.json()
+            .await
+            .map_err(|e| GateError::Malformed(e.to_string()))
     }
 
-    fn prepare(
+    async fn prepare(
         &self,
         request: PrepareContextRequest,
-    ) -> impl Future<Output = Result<PrepareContextResult, GateError>> + Send {
-        async move { self.post("/v1/context/prepare", &request).await }
+    ) -> Result<PrepareContextResult, GateError> {
+        self.post("/v1/context/prepare", &request).await
     }
 
-    fn capture(
+    async fn capture(
         &self,
         request: CaptureContentSourceRequest,
-    ) -> impl Future<Output = Result<serde_json::Value, GateError>> + Send {
-        async move { self.post("/v1/sources/content", &request).await }
+    ) -> Result<serde_json::Value, GateError> {
+        self.post("/v1/sources/content", &request).await
     }
 }

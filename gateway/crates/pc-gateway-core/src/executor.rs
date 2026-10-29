@@ -191,7 +191,7 @@ where
                             "model": call.request.model,
                         });
                         let digest = result.binding.as_deref()
-                            .map(|b| simple_digest(b))
+                            .map(simple_digest)
                             .unwrap_or_else(|| simple_digest(&String::from_utf8_lossy(&raw.body)));
                         let capture = CaptureContentSourceRequest {
                             scope_id: call.scope_id.clone(),
@@ -276,7 +276,7 @@ where
                 pointer: format!("/messages/{index}/content"),
                 start_byte: 0,
                 // UTF-8 字节数（非字符数）；区间必须落在字符边界（块整体是合法 UTF-8，天然满足）。
-                end_byte: block.as_bytes().len() as u64,
+                end_byte: block.len() as u64,
             },
         });
     }

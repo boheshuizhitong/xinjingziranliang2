@@ -103,7 +103,7 @@ async fn live_allow_returns_real_binding_and_deadlines() {
     // 期限分离：发送窗口 ~60s，关联窗口 ~300s。
     let now = chrono_like_now();
     let valid = parse_epoch_ms(&result.valid_until);
-    let correlate = result.correlate_until.as_deref().map(|s| parse_epoch_ms(s));
+    let correlate = result.correlate_until.as_deref().map(parse_epoch_ms);
     assert!(
         valid > now && valid <= now + 65_000,
         "发送期限应在 60s 窗口内: valid={valid} now={now}"

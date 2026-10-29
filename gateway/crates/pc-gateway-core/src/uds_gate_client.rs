@@ -12,7 +12,6 @@ use pc_gateway_types::{
     CaptureContentSourceRequest, ContextCheckRequest, ContextCheckResult, PrepareContextRequest,
     PrepareContextResult,
 };
-use std::future::Future;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -351,13 +350,13 @@ fn find_terminator(buf: &[u8]) -> Option<usize> {
 }
 
 impl GateClient for UdsGateClient {
-    fn check(
+    async fn check(
         &self,
         request: ContextCheckRequest,
-    ) -> impl Future<Output = Result<ContextCheckResult, GateError>> + Send {
+    ) -> Result<ContextCheckResult, GateError> {
         let body = serde_json::to_vec(&request).unwrap_or_default();
         let this = self.clone();
-        async move {
+        {
             let (status, body) = this.request("POST", "/v1/context/check", Some(&body)).await?;
             if !(200..300).contains(&status) {
                 return Err(GateError::GateUnavailable(format!("gate HTTP {status}")));
@@ -367,11 +366,9 @@ impl GateClient for UdsGateClient {
         }
     }
 
-    fn capabilities(
-        &self,
-    ) -> impl Future<Output = Result<serde_json::Value, GateError>> + Send {
+    async fn capabilities(&self) -> Result<serde_json::Value, GateError> {
         let this = self.clone();
-        async move {
+        {
             let (status, body) = this.request("GET", "/v1/capabilities", None).await?;
             if !(200..300).contains(&status) {
                 return Err(GateError::GateUnavailable(format!("capabilities HTTP {status}")));
@@ -381,13 +378,13 @@ impl GateClient for UdsGateClient {
         }
     }
 
-    fn prepare(
+    async fn prepare(
         &self,
         request: PrepareContextRequest,
-    ) -> impl Future<Output = Result<PrepareContextResult, GateError>> + Send {
+    ) -> Result<PrepareContextResult, GateError> {
         let body = serde_json::to_vec(&request).unwrap_or_default();
         let this = self.clone();
-        async move {
+        {
             let (status, body) = this.request("POST", "/v1/context/prepare", Some(&body)).await?;
             if !(200..300).contains(&status) {
                 return Err(GateError::GateUnavailable(format!("prepare HTTP {status}")));
@@ -397,13 +394,13 @@ impl GateClient for UdsGateClient {
         }
     }
 
-    fn capture(
+    async fn capture(
         &self,
         request: CaptureContentSourceRequest,
-    ) -> impl Future<Output = Result<serde_json::Value, GateError>> + Send {
+    ) -> Result<serde_json::Value, GateError> {
         let body = serde_json::to_vec(&request).unwrap_or_default();
         let this = self.clone();
-        async move {
+        {
             let (status, body) = this.request("POST", "/v1/sources/content", Some(&body)).await?;
             if !(200..300).contains(&status) {
                 return Err(GateError::GateUnavailable(format!("capture HTTP {status}")));

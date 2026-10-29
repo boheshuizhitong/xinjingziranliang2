@@ -67,5 +67,6 @@ pub trait Transport: Send + Sync {
     ) -> impl Future<Output = SendOutcome> + Send + 'a;
 
     /// 尽力取消上游（strict 检查失败/缓冲超限时必需）。
+    /// RPITIT 声明以固化 Send 约束（trait 是公开 API）。
     fn cancel<'a>(&'a self, send: &'a AdmittedSend) -> impl Future<Output = ()> + Send + 'a;
 }
