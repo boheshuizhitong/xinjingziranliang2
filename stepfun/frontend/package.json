@@ -1,0 +1,21 @@
+{
+  "name": "seekdb-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "浏览器端知识库: Transformers.js 本地向量化 + seekdb 混合检索",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^3.5.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.3",
+    "vite": "^5.4.10"
+  }
+}
