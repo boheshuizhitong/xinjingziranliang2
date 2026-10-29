@@ -75,10 +75,17 @@ and OceanBase uses HNSW for `vector` and `hybrid` searches.
 
 Inference configuration is documented in [Configure Pydantic AI inference](pydantic-ai-inference.md).
 
-Set `POWERCONTEXT_SERVER_RUNTIME_SCHEDULE_SECONDS` to process pending Source windows on a persisted interval. Scheduled
-discovery and execution use the primary database Work Ledger. In `single_node/all` mode the embedded Scheduler and
-Worker share that ledger; distributed OceanBase deployments run them as separate roles. A generation pipeline is
-required by the Worker.
+Set `POWERCONTEXT_SERVER_RUNTIME_SCHEDULE_SECONDS` to process pending Source windows on a persisted interval. A
+`single_node/all` deployment drives Memory, Experience, and Profile through the in-process artifact-processing
+supervisor, which owns the Family and the source window. A distributed OceanBase deployment replaces that scheduling
+with the primary database Work Ledger and splits the roles: `scheduler` only discovers work, `worker` only claims it, and
+`api` does neither.
+
+Exactly one path owns a Family. A Family the ledger drives is removed from the supervisor's binding set, so the two never
+claim the same window: otherwise the ledger advances the cursor and the supervisor's next tick records a noop instead of
+doing the work. Moving `single_node/all` itself onto the ledger is the bridge step RFC 1430 schedules for after the
+in-process supervisor retires. Scheduling works with either application database and requires a configured generation
+pipeline.
 
 ## HTTP surface
 

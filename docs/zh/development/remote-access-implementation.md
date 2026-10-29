@@ -72,8 +72,14 @@ export POWERCONTEXT_SERVER_DATABASE_URL="mysql+aoceanbase://user:password@host:2
 inference 配置见[配置 Pydantic AI 推理](pydantic-ai-inference.md)。
 
 设置 `POWERCONTEXT_SERVER_RUNTIME_SCHEDULE_SECONDS` 可以按持久化 interval 处理待消费的 Source window。
-定时发现和执行使用主数据库中的 Work Ledger。`single_node/all` 模式内嵌 Scheduler 与 Worker；分布式
-OceanBase 部署将它们作为独立角色运行。Worker 必须配置 generation pipeline。
+`single_node/all` 部署由进程内的 artifact processing supervisor 驱动 Memory、Experience 和 Profile，由它持有
+Family 与 Source window。分布式 OceanBase 部署用主数据库 Work Ledger 取代这一调度，并拆分角色：`scheduler`
+只做发现，`worker` 只做领取，`api` 两者都不做。
+
+每个 Family 只能有一个持有者。账本接管的 Family 会从 supervisor 的 binding 集合中移除，两者永不争抢同一个
+window：否则账本推进游标后，supervisor 的下一次 tick 只会记录 noop 而不再执行实际工作。把 `single_node/all`
+本身迁到账本，是 RFC 1430 安排在进程内 supervisor 退役之后的桥接步骤。调度在任一应用数据库上都可用，且需要
+配置 generation pipeline。
 
 ## HTTP 接口
 
