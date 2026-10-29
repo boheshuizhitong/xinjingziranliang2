@@ -215,10 +215,13 @@ so an administrator migrates the missing attribution explicitly:
    different Scopes; multi-user deployments keep this identity boundary explicit.
 
    The inventory includes merged and retired Artifact identities so supported restoration remains authorized.
-   HTTP `apply` and its preview report `owner-recovery-pending` or
+   Offline `apply`, HTTP `apply`, and the HTTP preview report `owner-recovery-pending` or
    `owner-recovery-delivered_relation_missing` when durable recovery evidence already records an identity.
    They preserve that evidence and do not replace its owner. Complete pending ownership delivery through the
    [ownership recovery procedure](../workflows/scopes-and-access.md#recover-external-ownership-writes).
+   With an external Access store, migration retains durable ownership delivery work if its audit write fails.
+   Repeating the same HTTP `apply` completes that original audit before reporting success, even if the owner
+   relation already exists. A preview does not replay pending work.
 
    Without a stopped-deployment window, the same flow is available over HTTP on a running Server:
    `POST /v1/access/ownership/apply` with `{"owner": {"type": "service", "id": "server-token"}, "dry_run": true}`

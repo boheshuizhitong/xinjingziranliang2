@@ -195,8 +195,10 @@ Principal，并仅向审核者授予审核权限。参见[分离 Agent 提交与
    再次执行；多用户部署由此保持明确的身份边界。
 
    盘点包含已合并和已退休的 Artifact 身份，以保留恢复操作所需的权限。如果持久化恢复记录已经确定归属，
-   HTTP `apply` 及其预览会报告 `owner-recovery-pending` 或 `owner-recovery-delivered_relation_missing`，
+   离线 `apply`、HTTP `apply` 及 HTTP 预览会报告 `owner-recovery-pending` 或 `owner-recovery-delivered_relation_missing`，
    并保留原始记录及其归属。待投递的归属信息应按[归属恢复流程](../workflows/scopes-and-access.md)继续处理。
+   使用外部 Access 存储时，如果审计写入失败，迁移会保留可重放的归属投递任务。即使 owner 关系已存在，
+   重复同一 HTTP `apply` 也会先完成原始审计，再报告成功。预览不会重放待处理任务。
 
    如果没有停机窗口，也可以对运行中的 Server 走 HTTP：`POST /v1/access/ownership/apply`（先用
    `dry_run: true` 预览）。认证模式下两个 HTTP 操作都要求 `server.admin`；`ACCESS_MODE=disabled` 时 `apply` 返回
