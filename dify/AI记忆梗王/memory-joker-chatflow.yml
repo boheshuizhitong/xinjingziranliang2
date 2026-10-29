@@ -1,0 +1,310 @@
+kind: app
+version: 0.6.1
+app:
+  name: "AI 记忆梗王"
+  description: |
+    越聊越熟的跨会话聊天伙伴——PowerContext 让 AI 记住你说过的一切，
+    每次对话都有新梗。Dify Chatflow + PowerContext Server。
+  mode: chatflow
+  icon: "🤡"
+  icon_background: "#FF6B6B"
+  use_icon_as_answer_icon: false
+  enabled: true
+  workflow:
+    conversation_variables: []
+    environment_variables: []
+    features:
+      opening_statement: |
+        🤡 嘿！我是「记忆梗王」！
+
+        不管你信不信——**我能记住你说过的每一句话**。
+        下次开新对话，我还能记得你今天说爱吃火锅、吐槽过加班、或者那个冷笑话。
+
+        来聊点什么吧？说点好玩的，或者告诉我你是谁～
+      suggested_questions:
+        - "我喜欢吃火锅，尤其是麻辣的那种"
+        - "今天加班好累啊"
+        - "给我讲个冷笑话"
+      speech_to_text:
+        enabled: false
+      text_to_speech:
+        enabled: false
+      retriever_resource:
+        enabled: false
+      annotation_reply:
+        enabled: false
+      user_input_form:
+        - label: "用户输入"
+          variable: query
+          type: paragraph
+          required: true
+          max_length: 2000
+          default: ""
+      sensitive_word_avoidance:
+        enabled: false
+      enable_vision: false
+      vision_config:
+        variable_selector: []
+
+dependencies:
+  - type: "extension"
+    extension_id: "http-request"
+    extension_name: "HTTP Request"
+
+graph:
+  nodes:
+    # ========================================
+    # 1. Start - 接收用户输入
+    # ========================================
+    - id: "start"
+      type: "start"
+      position:
+        x: 80
+        y: 280
+      positionAbsolute:
+        x: 80
+        y: 280
+      data:
+        title: "开始"
+        desc: "用户输入入口"
+        variables:
+          - variable: query
+            type: string
+            label: "用户输入"
+            required: true
+            max_length: 2000
+            default: ""
+
+    # ========================================
+    # 2. HTTP Request - 召回 PowerContext 记忆
+    #    GET http://localhost:8000/api/v1/memories/search
+    # ========================================
+    - id: "http_recall"
+      type: "http-request"
+      position:
+        x: 320
+        y: 280
+      positionAbsolute:
+        x: 320
+        y: 280
+      data:
+        title: "召回用户记忆"
+        desc: "从 PowerContext 搜索用户历史记忆"
+        method: "get"
+        url: "http://localhost:8000/api/v1/memories/search"
+        params:
+          - key: "query"
+            value: "{{#start.query#}}"
+            type: text
+          - key: "scope"
+            value: "user-{{#sys.user_id#}}"
+            type: text
+          - key: "limit"
+            value: "10"
+            type: text
+        headers:
+          - key: "Content-Type"
+            value: "application/json"
+        auth:
+          type: "no-auth"
+          config: {}
+        timeout:
+          max_connect_timeout: 10
+          max_read_timeout: 30
+          max_write_timeout: 10
+        retry:
+          max_retries: 2
+          retry_interval: 1
+        error_handle_mode: "continue_on_error"
+
+    # ========================================
+    # 3. LLM - 结合记忆生成梗式回复
+    # ========================================
+    - id: "llm_joker"
+      type: "llm"
+      position:
+        x: 560
+        y: 280
+      positionAbsolute:
+        x: 560
+        y: 280
+      data:
+        title: "梗王回复生成"
+        desc: "结合历史记忆和当前输入生成有趣回复"
+        model:
+          provider: "langgenius/openai/openai"
+          name: "gpt-4o-mini"
+          mode: "chat"
+        context:
+          enabled: false
+          variable_selector: []
+        vision:
+          enabled: false
+        prompt_template:
+          - role: "system"
+            text: |
+              你是「AI 记忆梗王」——一个越聊越熟的损友型 AI。
+              你的核心能力是**记住用户说过的一切，并在每次对话中引用这些记忆来制造笑点和亲切感**。
+
+              ## 你的风格
+              - 语气活泼、幽默、带点损但不刻薄
+              - 中文回复，偶尔穿插 emoji
+              - 回复要短平快，像朋友聊天，不要长篇大论
+              - 主动制造梗，比如："又加班？上次你也是这么说的……"
+
+              ## 记忆使用规则
+              用户之前说过的内容会在【历史记忆】区域列出。你必须：
+              1. **优先引用历史记忆**来制造关联感——提到用户之前的喜好、吐槽、习惯
+              2. **如果没有历史记忆**，就正常聊天，表现得像第一次见面但很热情
+              3. **如果历史记忆很多**，挑最相关的 1-2 条用，别全堆上去
+              4. 从记忆里提取关键信息，用自然语言融入回复，不要直接粘贴 JSON
+
+              ## 禁止行为
+              - 不要编造用户没说过的记忆
+              - 不要说"作为 AI 我没有记忆"之类的话
+              - 不要输出 JSON 或代码块
+
+              ## 回复长度
+              100-300 字，自然聊天感。
+          - role: "user"
+            text: |
+              【历史记忆】
+              {{#http_recall.body#}}
+
+              【当前用户说】
+              {{#start.query#}}
+
+              现在轮到你了，梗王模式启动！
+
+    # ========================================
+    # 4. Answer - 输出给用户（主路径）
+    # ========================================
+    - id: "answer"
+      type: "answer"
+      position:
+        x: 800
+        y: 280
+      positionAbsolute:
+        x: 800
+        y: 280
+      data:
+        title: "回复用户"
+        desc: "输出最终回复"
+        answer: "{{#llm_joker.text#}}"
+
+    # ========================================
+    # 5. Code - 准备记忆数据
+    # ========================================
+    - id: "code_prepare_memory"
+      type: "code"
+      position:
+        x: 560
+        y: 480
+      positionAbsolute:
+        x: 560
+        y: 480
+      data:
+        title: "准备保存数据"
+        desc: "把对话整理成 PowerContext 可存储的格式"
+        code_language: python3
+        code: |
+          import json
+
+          def main(user_input: str, assistant_response: str, conversation_id: str, dialogue_count: int, user_id: str) -> dict:
+              payload = {
+                  "scope": f"user-{user_id}",
+                  "messages": [
+                      {"role": "user", "content": user_input[:1000]},
+                      {"role": "assistant", "content": assistant_response[:1000]},
+                  ],
+                  "metadata": {
+                      "conversation_id": conversation_id,
+                      "dialogue_count": dialogue_count,
+                  }
+              }
+              return {
+                  "json_payload": json.dumps(payload, ensure_ascii=False),
+                  "payload_size": len(payload["messages"]),
+              }
+        variables:
+          - variable: user_input
+            value_selector: ["start", "query"]
+          - variable: assistant_response
+            value_selector: ["llm_joker", "text"]
+          - variable: conversation_id
+            value_selector: ["sys", "conversation_id"]
+          - variable: dialogue_count
+            value_selector: ["sys", "dialogue_count"]
+          - variable: user_id
+            value_selector: ["sys", "user_id"]
+        output_schema:
+          - variable: json_payload
+            type: string
+          - variable: payload_size
+            type: number
+
+    # ========================================
+    # 6. HTTP Request - 保存对话到 PowerContext
+    #    POST http://localhost:8000/api/v1/memories/remember
+    # ========================================
+    - id: "http_save"
+      type: "http-request"
+      position:
+        x: 800
+        y: 480
+      positionAbsolute:
+        x: 800
+        y: 480
+      data:
+        title: "保存记忆到 PowerContext"
+        desc: "把本轮对话保存到 PowerContext 供下次召回"
+        method: "post"
+        url: "http://localhost:8000/api/v1/memories/remember"
+        headers:
+          - key: "Content-Type"
+            value: "application/json"
+        params: []
+        body:
+          type: "json"
+          data: "{{#code_prepare_memory.json_payload#}}"
+        auth:
+          type: "no-auth"
+          config: {}
+        timeout:
+          max_connect_timeout: 5
+          max_read_timeout: 10
+          max_write_timeout: 5
+        retry:
+          max_retries: 1
+          retry_interval: 1
+        error_handle_mode: "continue_on_error"
+
+  # ========================================
+  # Edges
+  # ========================================
+  edges:
+    - source: "start"
+      target: "http_recall"
+      sourceType: "start"
+      targetType: "http-request"
+
+    - source: "http_recall"
+      target: "llm_joker"
+      sourceType: "http-request"
+      targetType: "llm"
+
+    - source: "llm_joker"
+      target: "answer"
+      sourceType: "llm"
+      targetType: "answer"
+      edgeType: "answer"
+
+    - source: "llm_joker"
+      target: "code_prepare_memory"
+      sourceType: "llm"
+      targetType: "code"
+
+    - source: "code_prepare_memory"
+      target: "http_save"
+      sourceType: "code"
+      targetType: "http-request"
