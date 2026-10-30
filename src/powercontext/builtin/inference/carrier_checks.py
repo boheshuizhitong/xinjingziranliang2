@@ -55,6 +55,8 @@ def _stream_fragments(  # noqa: C901 - normalize distinct streamed text and tool
                 "partial_json",
                 "refusal",
                 "thinking",
+                "reasoning",
+                "reasoning_content",
                 "delta",
             } and isinstance(child, str):
                 parts[path + identity_suffix + (key,)].append(child)

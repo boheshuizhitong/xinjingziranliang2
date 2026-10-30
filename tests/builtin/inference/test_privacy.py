@@ -261,14 +261,14 @@ def test_destination_and_output_window_are_independent_of_secrets() -> None:
     )
 
 
-def sse(content: tuple[str, ...], *, complete: bool = True) -> bytes:
+def sse(content: tuple[str, ...], *, field: str = "content", complete: bool = True) -> bytes:
     events: list[dict[str, Any]] = [
         {
             "id": "test",
             "object": "chat.completion.chunk",
             "created": 0,
             "model": "test-model",
-            "choices": [{"index": 0, "delta": {"content": piece}, "finish_reason": None}],
+            "choices": [{"index": 0, "delta": {field: piece}, "finish_reason": None}],
         }
         for piece in content
     ]
@@ -279,11 +279,12 @@ def sse(content: tuple[str, ...], *, complete: bool = True) -> bytes:
     ).encode()
 
 
-def test_strict_sse_scans_content_split_across_provider_events() -> None:
+@pytest.mark.parametrize("field", ["content", "reasoning_content", "reasoning"])
+def test_strict_sse_scans_content_split_across_provider_events(field: str) -> None:
     policy = PrivacyPolicy(config(allow_streaming=True))
-    assert inspect_sse(policy, sse(("synthetic-forbidden-", "secret")), "test").decision == "block"
-    assert inspect_sse(policy, sse(("clean",)), "test").decision == "allow"
-    assert inspect_sse(policy, sse(("clean",), complete=False), "test").decision == "withhold"
+    assert inspect_sse(policy, sse(("synthetic-forbidden-", "secret"), field=field), "test").decision == "block"
+    assert inspect_sse(policy, sse(("clean",), field=field), "test").decision == "allow"
+    assert inspect_sse(policy, sse(("clean",), field=field, complete=False), "test").decision == "withhold"
 
 
 class _Server(ThreadingHTTPServer):
@@ -583,7 +584,16 @@ def test_numeric_canonical_value_is_scanned_alongside_original_lexical_value() -
     assert policy.inspect_json(lexical, phase="before_send", target_profile="test").decision == "block"
 
 
-def test_sse_strict_transport_releases_no_content_before_joined_inspection() -> None:
+@pytest.mark.parametrize("field", ["content", "reasoning_content", "reasoning"])
+@pytest.mark.parametrize(
+    "fragments",
+    [("synthetic-forbidden-", "secret"), ('{"value":"synthetic-forbidden-', '\\u0073ecret"}')],
+)
+def test_sse_strict_transport_releases_no_content_before_joined_inspection(
+    field: str, fragments: tuple[str, ...]
+) -> None:
+    safe_payload = sse(("safe ", "text"), field=field)
+
     async def run(endpoint: str) -> None:
         released: list[bytes] = []
         async with httpx.AsyncClient(
@@ -594,12 +604,20 @@ def test_sse_strict_transport_releases_no_content_before_joined_inspection() -> 
                     "POST", endpoint, content=body("clean", stream=True), headers={"content-type": "application/json"}
                 ) as result:
                     released.extend([piece async for piece in result.aiter_bytes()])
+            assert caught.value.phase == "before_release"
             assert caught.value.reason_codes == ("forbidden_content",)
-        assert released == []
+            assert released == []
+            async with client.stream(
+                "POST", endpoint, content=body("clean", stream=True), headers={"content-type": "application/json"}
+            ) as result:
+                assert await result.aread() == safe_payload
 
-    with server([(200, "text/event-stream", sse(("synthetic-forbidden-", "secret")))]) as (upstream, endpoint):
+    with server([
+        (200, "text/event-stream", sse(fragments, field=field)),
+        (200, "text/event-stream", safe_payload),
+    ]) as (upstream, endpoint):
         asyncio.run(run(endpoint))
-        assert len(upstream.requests) == 1
+        assert len(upstream.requests) == 2
 
 
 def test_embedding_transport_preserves_inputs_and_blocks_before_real_send() -> None:
