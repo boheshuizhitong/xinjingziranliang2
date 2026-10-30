@@ -261,9 +261,17 @@ def _validation_schema_matches_payload(
     for name, field in source_class.model_fields.items():
         if field.exclude:
             continue
-        serialization_key = (field.serialization_alias or field.alias or name) if serialize_by_alias else name
-        if (field.is_required() or forbid_extra) and _validation_schema_key(name, field) != serialization_key:
-            return False
+        if field.is_required() or forbid_extra:
+            serialization_key = (field.serialization_alias or field.alias or name) if serialize_by_alias else name
+            if _validation_schema_key(name, field) != serialization_key:
+                return False
+        # A null default means this field can reach the payload as null, so a renamed
+        # shape below it need not appear and cannot justify replacing a manifest a
+        # deployment already accepted. Populating one instead requires the nested
+        # model to serialize by alias, which keeps the validation keys authoritative,
+        # or a new Definition version.
+        if field.default is None and not forbid_extra:
+            continue
         if not _validation_schema_matches_annotation(field.annotation, visited):
             return False
     return True

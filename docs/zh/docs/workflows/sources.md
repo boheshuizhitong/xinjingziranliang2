@@ -53,10 +53,12 @@ definition = AdapterSourceDefinition(
 远程 Source observation 在受信任的部署代码中配置同一声明，键为精确的 Definition 名称、版本与 manifest
 fingerprint。声明缺失、无效或不可用时解析为 `untrusted`/`unknown`，不阻塞采集、处理或既有检索。
 
-Observation manifest 校验 worker 序列化后的 payload，包括已填充的可选字段与嵌套模型。
-即使模型禁止额外字段，validation alias 也不要求 worker 重命名序列化后的键。
+Observation manifest 描述 payload 必须携带的每个字段的序列化形态。即使模型禁止额外字段，validation alias 也不要求
+worker 重命名序列化后的键。
 对于 Union，若另一分支的等价扁平基础字段 schema 能覆盖 alias 分支的序列化输出，可保留 validation manifest。
-无法证明分支覆盖时，使用 serialization schema。
+无法证明分支覆盖时使用 serialization schema，但默认值为 `null` 的字段除外：该字段在 payload 里可以是 `null`，
+其下的改名形态不得替换已接受的 manifest。要让这样的字段以改名后的键出现，嵌套模型必须按 alias 序列化，从而保持
+validation 键的权威性。改变已注册 Definition 的序列化表示需要新的 Definition 版本。
 
 每个 Memory revision 记录当时接受的声明与精确 Source materialization。保留的证据是权威且带版本的；其旁的索引
 投影是派生数据，维护可以丢弃它并从保留事实重建，且不查询当前 registry。声明不增加排序权重、不改变分数，

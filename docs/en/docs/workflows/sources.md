@@ -56,10 +56,14 @@ Remote Source observations configure the same declaration in trusted deployment 
 name, version, and manifest fingerprint. A missing, invalid, or unavailable declaration resolves to
 `untrusted`/`unknown`; it does not block capture, processing, or existing retrieval.
 
-Observation manifests validate the worker's serialized payload, including populated optional fields and nested models.
-Validation aliases do not require workers to rename serialized keys, including when a model forbids extra fields.
+Observation manifests describe the serialized payload for every field the payload must carry. Validation aliases do
+not require workers to rename serialized keys, including when a model forbids extra fields.
 For unions, an alias-renamed branch may retain the validation manifest when another branch has an equivalent flat
-primitive-property schema covering its serialized output. Unproven branch coverage uses the serialization schema.
+primitive-property schema covering its serialized output. Unproven branch coverage uses the serialization schema, except
+for a field whose default is `null`: it can reach the payload as `null`, so a renamed shape below it never replaces an
+accepted manifest. Populating such a field with a renamed key requires the nested model to serialize by alias, which
+keeps the validation keys authoritative. Changing what a registered Definition serializes requires a new Definition
+version.
 
 Each Memory revision records the declaration and exact Source materialization accepted with it. That retained evidence
 is authoritative and versioned. The index projection beside it is derived: maintenance can discard and rebuild it

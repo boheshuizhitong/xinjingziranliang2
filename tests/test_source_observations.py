@@ -26,6 +26,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_serial
 from pydantic.alias_generators import to_camel
 from referencing.exceptions import Unresolvable
 
+from powercontext import InvalidSourceObservationError
 from powercontext.builtin.persistence.source_definitions import SourceDefinitionManifestRepository
 from powercontext.builtin.persistence.sqlite import SQLiteConfig, SQLiteProfile
 from powercontext.builtin.persistence.tables import SHARED_TABLES
@@ -319,8 +320,11 @@ def test_optional_alias_keeps_the_preexisting_manifest_fingerprint(tmp_path) -> 
     asyncio.run(scenario())
 
 
-@pytest.mark.parametrize("wrapper", ["default", "nullable", "list"])
+@pytest.mark.parametrize("wrapper", ["default", "list"])
 def test_populated_optional_nested_alias_accepts_the_worker_payload(wrapper: str) -> None:
+    # A field with a concrete default always reaches the payload, so a renamed nested
+    # shape below it must be described by the serialization schema. A null default is
+    # covered by test_nullable_nested_alias_upgrade_keeps_the_accepted_manifest.
     class Detail(BaseModel):
         model_config = ConfigDict(populate_by_name=True)
         label: str = Field(alias="wire_label")
@@ -328,15 +332,11 @@ def test_populated_optional_nested_alias_accepts_the_worker_payload(wrapper: str
     class DefaultNestedSource(Source):
         detail: Detail = Field(default_factory=lambda: Detail.model_validate({"label": "Default label."}))
 
-    class NullableNestedSource(Source):
-        detail: Detail | None = None
-
     class ListNestedSource(Source):
         detail: list[Detail] = Field(default_factory=list)
 
     source_model = {
         "default": DefaultNestedSource,
-        "nullable": NullableNestedSource,
         "list": ListNestedSource,
     }[wrapper]
 
@@ -379,8 +379,11 @@ def test_populated_optional_nested_alias_accepts_the_worker_payload(wrapper: str
     asyncio.run(scenario())
 
 
-def test_nullable_nested_alias_manifest_accepts_empty_payload(tmp_path) -> None:
+def test_nullable_nested_alias_upgrade_keeps_the_accepted_manifest(tmp_path) -> None:
+    """A payload that can only carry null cannot justify replacing an accepted manifest."""
+
     class Detail(BaseModel):
+        model_config = ConfigDict(populate_by_name=True)
         label: str = Field(alias="wire_label")
 
     class NullableSource(Source):
@@ -408,8 +411,15 @@ def test_nullable_nested_alias_manifest_accepts_empty_payload(tmp_path) -> None:
         source = await registry.resolve("Retained.")
         manifest = manifest_for_definition(definition)
         observation = project_source_for_transport(registry, source)
-        # The declaration must also accept a populated Detail, even for an empty observation.
-        assert manifest.source_schema == NullableSource.model_json_schema(mode="serialization", by_alias=False)
+        baseline = {
+            "name": definition.name,
+            "version": definition.version,
+            "source_schema": NullableSource.model_json_schema(),
+            "projections": [],
+        }
+        # Renaming the nested key only matters to material this Definition never emits.
+        assert manifest.source_schema == NullableSource.model_json_schema()
+        assert manifest.fingerprint == f"sha256:{hashlib.sha256(rfc8785.dumps(baseline)).hexdigest()}"
         assert observation.payload["detail"] is None
 
         config = SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'nullable-nested.db'}")
@@ -423,6 +433,72 @@ def test_nullable_nested_alias_manifest_accepts_empty_payload(tmp_path) -> None:
                 SubmitSourceObservation(scope_id="scope-a", observation=observation)
             )
             assert receipt.source_ref.source_id == "nullable"
+            # Populating the field needs a representation the accepted manifest describes,
+            # so the flat field-name payload is rejected instead of silently accepted.
+            populated = project_source_for_transport(
+                registry,
+                NullableSource(
+                    name="nullable",
+                    definition_version="2",
+                    materialization=SourceMaterialization.CAPTURED,
+                    detail=Detail.model_validate({"label": "Populated."}),
+                ),
+            )
+            with pytest.raises(InvalidSourceObservationError, match="schema"):
+                await contexts.submit_source_observation(
+                    SubmitSourceObservation(scope_id="scope-a", observation=populated)
+                )
+
+    asyncio.run(scenario())
+
+
+def test_nullable_nested_alias_serializing_by_alias_accepts_populated_payloads(tmp_path) -> None:
+    """A nested model that serializes by alias keeps the accepted manifest and populated values."""
+
+    class Detail(BaseModel):
+        model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+        label: str = Field(alias="wire_label")
+
+    class NullableSource(Source):
+        detail: Detail | None = None
+
+    class PopulatedAdapter:
+        name = "nullable-nested-alias"
+        input_class = str
+        source_class = NullableSource
+
+        async def resolve(self, value: str, /) -> NullableSource:
+            return NullableSource(
+                name="populated",
+                definition_version="1",
+                materialization=SourceMaterialization.CAPTURED,
+                detail=Detail.model_validate({"label": value}),
+            )
+
+        async def read(self, source: NullableSource, /) -> str:
+            return source.name
+
+    async def scenario() -> None:
+        definition = AdapterSourceDefinition(PopulatedAdapter(), version="1")
+        registry = SourceDefinitionRegistry((definition,))
+        source = await registry.resolve("Retain the nested value.")
+        manifest = manifest_for_definition(definition)
+        observation = project_source_for_transport(registry, source)
+        assert manifest.source_schema == NullableSource.model_json_schema()
+        assert observation.payload["detail"] == {"wire_label": "Retain the nested value."}
+
+        config = SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'nullable-alias.db'}")
+        async with SQLiteProfile.open(config, tables=SHARED_TABLES) as profile:
+            contexts = RelationalContexts(database=profile.database, source_registry=SourceDefinitionRegistry(()))
+            await contexts.register_source_definition(manifest)
+            receipt = await contexts.submit_source_observation(
+                SubmitSourceObservation(scope_id="scope-a", observation=observation)
+            )
+            stored = await (await contexts.get("scope-a")).sources.get(observation)
+
+        assert receipt.source_ref.source_id == "populated"
+        assert isinstance(stored, SourceObservation)
+        assert stored.payload["detail"] == {"wire_label": "Retain the nested value."}
 
     asyncio.run(scenario())
 
