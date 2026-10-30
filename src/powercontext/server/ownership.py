@@ -24,6 +24,7 @@ idempotent Access-store transaction that can be safely repeated.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from hashlib import sha256
@@ -457,7 +458,7 @@ async def _attest_gap_owner(
         family=gap.family,
         proposed_owner=owner,
         target=target,
-        idempotency_key=f"candidate-owner:{gap.scope_id}:{gap.candidate_id}",
+        idempotency_key=_migration_key("candidate-owner", gap.scope_id, gap.candidate_id),
     )
 
 
@@ -483,7 +484,16 @@ def _owner_identity(gap: ArtifactOwnershipGap) -> tuple[str, ResourceRef]:
         )
         return f"base-artifact-owner:{sha256(resource.key.encode()).hexdigest()}", resource
     if gap.family == "profile" and gap.artifact_id == "profile":
-        key = f"profile-owner:{gap.scope_id}"
+        key = _migration_key("profile-owner", gap.scope_id)
     else:
-        key = f"{gap.family}-owner:{gap.scope_id}:{gap.artifact_id}"
+        key = _migration_key(f"{gap.family}-owner", gap.scope_id, gap.artifact_id)
     return key, ResourceRef.artifact(gap.scope_id, family=gap.family, artifact_id=gap.artifact_id)
+
+
+def _migration_key(prefix: str, *identity: str) -> str:
+    """Keep accepted keys stable; hash complete identity parts for longer keys."""
+    key = f"{prefix}:{':'.join(identity)}"
+    if len(key) <= 255:
+        return key
+    encoded = json.dumps((prefix, *identity), ensure_ascii=False, separators=(",", ":")).encode()
+    return f"{prefix}:{sha256(encoded).hexdigest()}"

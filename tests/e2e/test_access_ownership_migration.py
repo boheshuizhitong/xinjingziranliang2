@@ -36,6 +36,7 @@ from typer.testing import CliRunner
 
 from powercontext.builtin.persistence.sqlite import SQLiteConfig
 from powercontext.builtin.runtime import RuntimeConfig
+from powercontext.builtin.scope import ScopeApplication, ScopeDraft
 from powercontext.cli.app import create_cli
 from powercontext.server.authentication import AuthenticationResult, ProviderReadiness
 from powercontext.server.authz import AccessAuditContext, AccessConflictError, PrincipalRef, ResourceRef
@@ -307,6 +308,103 @@ async def _enforced_server(database: SQLiteConfig, tmp_path: Path):
             httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client,
         ):
             yield client, access
+
+
+@pytest.mark.parametrize("scope_length", [240, 256])
+@pytest.mark.parametrize("kind", ["experience", "profile", "candidate"])
+def test_long_scope_ownership_migration_matches_preview(tmp_path: Path, scope_length: int, kind: str) -> None:
+    async def scenario() -> None:
+        database = SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'long-scope.db'}")
+        scope_id = "s" * scope_length
+        artifacts: list[dict[str, Any]] = []
+        candidate: dict[str, Any] | None = None
+        app = create_server_app(settings=_settings(database, "disabled"), scheduler_path=tmp_path / "scheduler.db")
+        async with (
+            app.router.lifespan_context(app),
+            httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client,
+        ):
+            scopes = ScopeApplication(app.state.application.primary_database, id_factory=lambda: scope_id)
+            await scopes.create(
+                ScopeDraft(title="Long Scope", summary="Legacy ownership", idempotency_key="long-scope")
+            )
+            if kind == "candidate":
+                source = checked(
+                    await client.post(
+                        "/v1/sources/content",
+                        json={"scope_id": scope_id, "source_id": "legacy-source", "content": "A test passed."},
+                    ),
+                    202,
+                )["source"]
+                candidate = checked(
+                    await client.post(
+                        "/v1/experience/propose",
+                        json={
+                            "scope_id": scope_id,
+                            "source_refs": [source],
+                            "artifact_refs": [],
+                            "proposal": {
+                                "situation": "An identity is long.",
+                                "action": "Migrate its owner.",
+                                "outcome": "The owner is recorded.",
+                                "lesson": "Accept supported identities.",
+                            },
+                        },
+                    ),
+                    201,
+                )
+            else:
+                for index in range(2 if kind == "experience" else 1):
+                    content = (
+                        {"content": "# Legacy profile"}
+                        if kind == "profile"
+                        else {
+                            "situation": "An identity is long.",
+                            "action": "Migrate its owner.",
+                            "outcome": "The owner is recorded.",
+                            "lesson": f"Preserve identity {index}.",
+                        }
+                    )
+                    created = checked(
+                        await client.post(
+                            f"/v1/scopes/{scope_id}/artifacts", json={"family": kind, "content": content}
+                        ),
+                        201,
+                    )
+                    artifacts.append(
+                        checked(
+                            await client.get(f"/v1/scopes/{scope_id}/artifacts/{kind}/{created['artifact_id']}"), 200
+                        )
+                    )
+        async with _enforced_server(database, tmp_path) as (client, access):
+            payload = {"scope_ids": [scope_id], "owner": {"type": ADMIN.type, "id": ADMIN.id}}
+            preview = checked(await client.post("/v1/access/ownership/apply", json={**payload, "dry_run": True}), 200)
+            assert preview["conflicts"] == []
+            assert len(preview["applied"]) == len(artifacts) + int(candidate is not None)
+            applied = checked(await client.post("/v1/access/ownership/apply", json=payload), 200)
+            assert applied["applied"] == preview["applied"]
+            assert applied["conflicts"] == []
+            keys = []
+            for artifact in artifacts:
+                resource = ResourceRef.artifact(scope_id, family=kind, artifact_id=artifact["artifact_id"])
+                relation = await access.artifact_owner(resource)
+                assert relation is not None and relation.owner == ADMIN
+                keys.append(relation.idempotency_key)
+                restored = checked(
+                    await client.get(f"/v1/scopes/{scope_id}/artifacts/{kind}/{artifact['artifact_id']}"), 200
+                )
+                assert restored["artifact_id"] == artifact["artifact_id"]
+                assert restored["revision"] == artifact["revision"]
+                assert restored["content"] == artifact["content"]
+            if candidate is not None:
+                attestation = await access.candidate_owner(scope_id, candidate["candidate_id"])
+                assert attestation is not None and attestation.proposed_owner == ADMIN
+                keys.append(attestation.idempotency_key)
+            assert all(len(key) <= 255 for key in keys)
+            assert len(set(keys)) == len(keys)
+            repeated = checked(await client.post("/v1/access/ownership/apply", json=payload), 200)
+            assert repeated["applied"] == repeated["conflicts"] == []
+
+    asyncio.run(scenario())
 
 
 @pytest.mark.parametrize("retire_result_before_switch", [False, True])
