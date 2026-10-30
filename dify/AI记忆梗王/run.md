@@ -67,12 +67,21 @@ DSL 中默认使用 `langgenius/openai/openai` → `gpt-4o-mini`。导入 Dify �
 
 ## 四、启动 PowerContext Server
 
-### 4.1 从团队仓库
+> 本项目自带一个轻量 PowerContext 兼容服务器（`powercontext/` 子目录），
+> 实现 DSL 需要的两个 HTTP 端点。**无需额外克隆或编译**。
+
+### 4.1 一键启动
 
 ```bash
-cd powercontext/
-pip install -r requirements.txt
-python -m powercontext.server
+cd dify/AI记忆梗王/powercontext/
+pip install -r requirements.txt      # 或直接 python start.py（自动装）
+python server.py                      # 默认 http://localhost:8000
+```
+
+或者（自动安装依赖 + 启动）：
+
+```bash
+python dify/AI记忆梗王/powercontext/start.py
 ```
 
 默认监听 `http://localhost:8000`，提供两个关键端点：
