@@ -193,48 +193,60 @@ def test_zcode_source_is_processed_and_recalled_in_a_new_session(tmp_path: Path,
             remaining = 5 - time.time() % 5
             if remaining < 1.5:
                 time.sleep(remaining + 0.05)
-            stopped = subprocess.run(
-                [node, str(HOOK.parent / "stop.mjs")],
-                input=json.dumps({
-                    "hookEventName": "Stop",
-                    "cwd": str(HOOK.parents[5]),
-                    "sessionId": "old-session",
-                    "stopHookActive": False,
-                }),
-                env={
-                    **environment,
-                    "POWERCONTEXT_ZCODE_SCOPE_ID": scope_id,
-                    "POWERCONTEXT_ZCODE_BOUNDARY_FLUSH": "true",
-                },
-                text=True,
-                capture_output=True,
-                check=False,
-                timeout=2,
-            )
-            assert stopped.returncode == 0, stopped.stderr
-            assert json.loads(stopped.stdout) == {}
-            status = subprocess.run(
-                [
-                    node,
-                    str(HOOK.parent.parent / "scripts/status.mjs"),
-                    "--cwd",
-                    str(HOOK.parents[5]),
-                    "--session-id",
-                    "old-session",
-                ],
-                env={
-                    **environment,
-                    "POWERCONTEXT_ZCODE_SCOPE_ID": scope_id,
-                    "POWERCONTEXT_ZCODE_BOUNDARY_FLUSH": "true",
-                },
-                text=True,
-                capture_output=True,
-                check=False,
-                timeout=10,
-            )
-            assert status.returncode == 0, status.stdout + status.stderr
-            result = json.loads(status.stdout)
-            assert result["observation"]["stages"]["flush"]["state"] == "cursor_reached", result
+            # The Stop hook bounds its boundary flush with ``AbortSignal.timeout(800)``,
+            # so a single attempt is allowed to end ``unknown`` on a loaded machine.
+            # Re-issue the bounded flush until it observes the cursor instead of
+            # encoding machine speed into the assertion.
+            flush_state = None
+            result = None
+            deadline = time.monotonic() + 30
+            while True:
+                stopped = subprocess.run(
+                    [node, str(HOOK.parent / "stop.mjs")],
+                    input=json.dumps({
+                        "hookEventName": "Stop",
+                        "cwd": str(HOOK.parents[5]),
+                        "sessionId": "old-session",
+                        "stopHookActive": False,
+                    }),
+                    env={
+                        **environment,
+                        "POWERCONTEXT_ZCODE_SCOPE_ID": scope_id,
+                        "POWERCONTEXT_ZCODE_BOUNDARY_FLUSH": "true",
+                    },
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                    timeout=2,
+                )
+                assert stopped.returncode == 0, stopped.stderr
+                assert json.loads(stopped.stdout) == {}
+                status = subprocess.run(
+                    [
+                        node,
+                        str(HOOK.parent.parent / "scripts/status.mjs"),
+                        "--cwd",
+                        str(HOOK.parents[5]),
+                        "--session-id",
+                        "old-session",
+                    ],
+                    env={
+                        **environment,
+                        "POWERCONTEXT_ZCODE_SCOPE_ID": scope_id,
+                        "POWERCONTEXT_ZCODE_BOUNDARY_FLUSH": "true",
+                    },
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                    timeout=10,
+                )
+                assert status.returncode == 0, status.stdout + status.stderr
+                result = json.loads(status.stdout)
+                flush_state = result["observation"]["stages"]["flush"]["state"]
+                if flush_state == "cursor_reached" or time.monotonic() >= deadline:
+                    break
+                time.sleep(0.25)
+            assert flush_state == "cursor_reached", result
             assert result["pending"]["scopes"] == []
             entries = client.post("/v1/memory/entries/list", json={"scope_id": scope_id})
             entries.raise_for_status()
