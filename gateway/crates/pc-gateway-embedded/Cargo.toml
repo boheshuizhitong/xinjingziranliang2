@@ -1,0 +1,10 @@
+[package]
+name = "pc-gateway-embedded"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "PowerContext Gateway: optional embedded/FFI surface for in-process (Python) executors"
+
+[dependencies]
+pc-gateway-core = { workspace = true }
+pc-gateway-types = { workspace = true }
