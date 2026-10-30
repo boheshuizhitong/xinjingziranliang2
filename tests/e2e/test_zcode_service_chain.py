@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import shutil
@@ -45,7 +46,11 @@ HOOK = Path(__file__).resolve().parents[2] / "integrations/zcode/plugins/powerco
 
 
 class DeterministicSourcePipeline:
+    def __init__(self, delay: float = 0) -> None:
+        self.delay = delay
+
     async def generate(self, request: AtomicMemoryExtractionInput, /) -> GenerationResult[AtomicMemoryExtractionOutput]:
+        await asyncio.sleep(self.delay)
         return GenerationResult(
             output=AtomicMemoryExtractionOutput(
                 candidates=tuple(
@@ -86,7 +91,10 @@ def _invoke_hook(
     return json.loads(result.stdout)
 
 
-def test_zcode_source_is_processed_and_recalled_in_a_new_session(tmp_path: Path, monkeypatch) -> None:
+@pytest.mark.parametrize("processing_delay", [0, 1.2], ids=["fast", "beyond-stop-budget"])
+def test_zcode_source_is_processed_and_recalled_in_a_new_session(
+    tmp_path: Path, monkeypatch, processing_delay: float
+) -> None:
     monkeypatch.setenv("ZCODE_PLUGIN_DATA", str(tmp_path / "plugin-data"))
     node = shutil.which("node")
     if node is None:
@@ -95,7 +103,7 @@ def test_zcode_source_is_processed_and_recalled_in_a_new_session(tmp_path: Path,
         settings=ServerSettings(
             database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'zcode.db'}"), mcp=McpConfig(enabled=False)
         ),
-        candidate_pipeline=atomic_memory_pipeline(DeterministicSourcePipeline()),
+        candidate_pipeline=atomic_memory_pipeline(DeterministicSourcePipeline(processing_delay)),
     )
     with socket.socket() as socket_probe:
         socket_probe.bind(("127.0.0.1", 0))
@@ -234,13 +242,40 @@ def test_zcode_source_is_processed_and_recalled_in_a_new_session(tmp_path: Path,
             )
             assert status.returncode == 0, status.stdout + status.stderr
             result = json.loads(status.stdout)
-            assert result["observation"]["stages"]["flush"]["state"] == "cursor_reached", result
-            assert result["pending"]["scopes"] == []
-            entries = client.post("/v1/memory/entries/list", json={"scope_id": scope_id})
-            entries.raise_for_status()
-            assert entries.json()["entries"]
+            flush = result["observation"]["stages"]["flush"]
+            assert result["observation"]["config"]["request_timeout_ms"] == 800
+            assert result["observation"]["config"]["hook_budget_ms"] == 1000
+            if processing_delay:
+                assert flush["state"] == "unknown", result
+            if flush["state"] == "unknown":
+                # The bounded Stop can time out while real Server processing continues.
+                # Preserve the durable pause; reading results must never replay the flush.
+                assert flush["code"] == "timeout", result
+                assert flush["source_position"] > 0
+                assert result["pending"]["scopes"] == [
+                    {
+                        "scope_id": scope_id,
+                        "receipt_count": 1,
+                        "target_position": flush["source_position"],
+                        "tracking_incomplete": False,
+                        "unknown_flush_paused": True,
+                    }
+                ], result
+            else:
+                assert flush["state"] == "cursor_reached", result
+                assert flush["current_cursor"] >= flush["source_position"]
+                assert result["pending"]["scopes"] == []
+            # Server completion has its own budget, independent of the host Hook deadline.
+            deadline = time.monotonic() + 15
+            while True:
+                entries = client.post("/v1/memory/entries/list", json={"scope_id": scope_id})
+                entries.raise_for_status()
+                generated = next((entry for entry in entries.json()["entries"] if "teal-731" in entry["text"]), None)
+                if generated is not None:
+                    break
+                assert time.monotonic() < deadline, entries.json()
+                time.sleep(0.05)
             assert all(entry["artifact"]["family"] == "atomic-memory" for entry in entries.json()["entries"])
-            generated = next(entry for entry in entries.json()["entries"] if "teal-731" in entry["text"])
             captured = client.get(f"/v1/scopes/{scope_id}/sources").json()["items"]
             reference = generated["artifact"]
             revision = client.get(
