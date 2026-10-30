@@ -1,30 +1,50 @@
 kind: app
 version: 0.6.1
 app:
-  name: "AI 记忆梗王"
+  name: "AI 记忆梗王 · 记忆大考验"
   description: |
-    越聊越熟的跨会话聊天伙伴——PowerContext 让 AI 记住你说过的一切，
-    每次对话都有新梗。Dify Chatflow + PowerContext Server。
+    一个有胜负的跨会话记忆游戏。AI 从 PowerContext 召回你的历史对话，
+    出题考你"上次你说过什么"，答对得分，答错 AI 爆梗吐槽。
+    Dify Chatflow + PowerContext Server。
   mode: chatflow
-  icon: "🤡"
+  icon: "🎯"
   icon_background: "#FF6B6B"
   use_icon_as_answer_icon: false
   enabled: true
   workflow:
-    conversation_variables: []
+    conversation_variables:
+      - variable: score
+        value_type: number
+        value: "0"
+      - variable: round
+        value_type: number
+        value: "0"
+      - variable: challenge_mode
+        value_type: string
+        value: "idle"
+      - variable: pending_questions
+        value_type: string
+        value: "[]"
     environment_variables: []
     features:
       opening_statement: |
-        🤡 嘿！我是「记忆梗王」！
+        🎯 嘿！我是「记忆梗王」！
 
-        不管你信不信——**我能记住你说过的每一句话**。
-        下次开新对话，我还能记得你今天说爱吃火锅、吐槽过加班、或者那个冷笑话。
+        两种玩法，选一个：
 
-        来聊点什么吧？说点好玩的，或者告诉我你是谁～
+        💬 **闲聊模式**：随便聊点什么——你的喜好、吐槽、冷笑话……
+        我说过的每句话都会被我记下来（真的！）
+
+        ⚔️ **挑战模式**：跟我说「考我」或「开始挑战」，
+        我会从你之前告诉我的事里出 3 道填空题，答对得 1 分，看看你能不能赢过自己的黑历史！
+
+        （挑战模式支持**跨会话**——换个新对话，我还记得你哦～）
       suggested_questions:
-        - "我喜欢吃火锅，尤其是麻辣的那种"
-        - "今天加班好累啊"
+        - "我超爱吃麻辣火锅，尤其是海底捞的番茄锅"
+        - "今天加班到9点，老板说还得优化"
         - "给我讲个冷笑话"
+        - "考我"
+        - "开始挑战"
       speech_to_text:
         enabled: false
       text_to_speech:
@@ -76,8 +96,7 @@ graph:
             default: ""
 
     # ========================================
-    # 2. HTTP Request - 召回 PowerContext 记忆
-    #    GET http://localhost:8000/api/v1/memories/search
+    # 2. HTTP Request - 从 PowerContext 召回用户记忆
     # ========================================
     - id: "http_recall"
       type: "http-request"
@@ -89,7 +108,7 @@ graph:
         y: 280
       data:
         title: "召回用户记忆"
-        desc: "从 PowerContext 搜索用户历史记忆"
+        desc: "从 PowerContext 搜索用户历史记忆（跨会话可用）"
         method: "get"
         url: "http://localhost:8000/api/v1/memories/search"
         params:
@@ -118,9 +137,9 @@ graph:
         error_handle_mode: "continue_on_error"
 
     # ========================================
-    # 3. LLM - 结合记忆生成梗式回复
+    # 3. LLM - 核心：分类 + 出题 + 判题 + 梗式回复
     # ========================================
-    - id: "llm_joker"
+    - id: "llm_core"
       type: "llm"
       position:
         x: 560
@@ -129,8 +148,8 @@ graph:
         x: 560
         y: 280
       data:
-        title: "梗王回复生成"
-        desc: "结合历史记忆和当前输入生成有趣回复"
+        title: "梗王核心（分类/出题/判题）"
+        desc: "智能判断对话意图：闲聊 or 发起挑战 or 答题"
         model:
           provider: "langgenius/openai/openai"
           name: "gpt-4o-mini"
@@ -143,33 +162,76 @@ graph:
         prompt_template:
           - role: "system"
             text: |
-              你是「AI 记忆梗王」——一个越聊越熟的损友型 AI。
-              你的核心能力是**记住用户说过的一切，并在每次对话中引用这些记忆来制造笑点和亲切感**。
+              你是「AI 记忆梗王」——一个越聊越熟、还会考你记忆的损友型 AI。
 
-              ## 你的风格
-              - 语气活泼、幽默、带点损但不刻薄
-              - 中文回复，偶尔穿插 emoji
-              - 回复要短平快，像朋友聊天，不要长篇大论
-              - 主动制造梗，比如："又加班？上次你也是这么说的……"
+              ## 三种对话模式
 
-              ## 记忆使用规则
-              用户之前说过的内容会在【历史记忆】区域列出。你必须：
-              1. **优先引用历史记忆**来制造关联感——提到用户之前的喜好、吐槽、习惯
-              2. **如果没有历史记忆**，就正常聊天，表现得像第一次见面但很热情
-              3. **如果历史记忆很多**，挑最相关的 1-2 条用，别全堆上去
-              4. 从记忆里提取关键信息，用自然语言融入回复，不要直接粘贴 JSON
+              仔细判断【当前用户说】属于以下哪种，然后按对应规则回复：
 
-              ## 禁止行为
-              - 不要编造用户没说过的记忆
-              - 不要说"作为 AI 我没有记忆"之类的话
-              - 不要输出 JSON 或代码块
+              ### 模式 A：闲聊/正常聊天
+              触发词：普通对话、吐槽、喜好分享、讲笑话等（不含"考我/挑战/答题"）
 
-              ## 回复长度
-              100-300 字，自然聊天感。
+              回复风格：
+              - 活泼幽默带点损，像朋友聊天
+              - 优先引用【历史记忆】制造关联感："上次你说爱吃火锅，今天又加班？"
+              - 100-300 字，中文，偶尔 emoji
+
+              ### 模式 B：发起挑战（用户说"考我"/"挑战"/"来一轮"/"出题"）
+              目标：从【历史记忆】里出 3 道**填空题**，考用户"上次你告诉过我什么"
+
+              出题规则：
+              1. 从召回的历史记忆中挑 3 条**有明确答案的事实性内容**
+                 （比如用户说过的喜好、习惯、具体事件、吐槽点）
+              2. 每题格式：数字 + 横线 + 空 + 提示。例：
+                 ```
+                 🎯 记忆大考验 · 第 {{round}} 轮
+
+                 1. 上次你告诉我，你最爱吃的火锅类型是 ______（提示：辣的 vs 不辣的）
+                 2. 你吐槽过加班到 ______ 点
+                 3. 我让你讲了个冷笑话，你说的是：为什么程序员分不清万圣节和圣诞节？______
+                 ```
+              3. 如果历史记忆少于 3 条，实话实说：
+                 "你还没告诉我太多事呢！先聊几句存点记忆再考你～"
+
+              ### 模式 C：答题判分
+              触发条件：你之前刚出过题，现在用户在作答
+              （用{{challenge_mode}}判断上一轮是否在挑战中）
+
+              判题规则：
+              1. 对比用户回答 vs 【历史记忆】里的原始内容
+              2. 答对（含义正确即可，不必逐字）→ +1 分，用 ✅
+              3. 答错或答非所问 → 0 分，用 ❌ + 爆梗吐槽
+              4. 最后给**本轮得分 / 3** + **累计总分** + 一句梗王评语
+
+              判题输出格式示例：
+              ```
+              🧐 答题判分中...
+
+              1. 海底捞番茄锅 ✅（对！上次你说得超详细）
+              2. 8 点 ❌（哈哈你说的是 9 点好吗——果然加班使人失忆）
+              3. 因为 Oct 31 == Dec 25 ✅（厉害！这梗我记着呢）
+
+              本轮得分：2 / 3  累计：{{score}} / 9
+
+              🏆 梗王评语：记忆还行，但别高兴太早，下次我出更损的！
+              ```
+
+              ## 技术规则
+              - 【历史记忆】区域含 PowerContext 召回的内容，是判题的唯一标准答案来源
+              - 不要编造记忆——如果某条记忆不确定，用最保守的判断
+              - 回复不要输出 JSON 或代码块标记（上面的示例格式是给你看的模板）
+              - 不要说"作为 AI 我没有记忆"这类话
+
           - role: "user"
             text: |
-              【历史记忆】
+              【历史记忆 · PowerContext 召回】
               {{#http_recall.body#}}
+
+              【挑战状态】
+              当前会话得分：{{#conversation_variables.score#}}
+              当前回合：{{#conversation_variables.round#}}
+              上一轮模式：{{#conversation_variables.challenge_mode#}}
+              待答题目：{{#conversation_variables.pending_questions#}}
 
               【当前用户说】
               {{#start.query#}}
@@ -177,7 +239,7 @@ graph:
               现在轮到你了，梗王模式启动！
 
     # ========================================
-    # 4. Answer - 输出给用户（主路径）
+    # 4. Answer - 输出给用户
     # ========================================
     - id: "answer"
       type: "answer"
@@ -190,12 +252,12 @@ graph:
       data:
         title: "回复用户"
         desc: "输出最终回复"
-        answer: "{{#llm_joker.text#}}"
+        answer: "{{#llm_core.text#}}"
 
     # ========================================
-    # 5. Code - 准备记忆数据
+    # 5. Code - 提取分数 + 准备记忆数据
     # ========================================
-    - id: "code_prepare_memory"
+    - id: "code_extract"
       type: "code"
       position:
         x: 560
@@ -204,13 +266,35 @@ graph:
         x: 560
         y: 480
       data:
-        title: "准备保存数据"
-        desc: "把对话整理成 PowerContext 可存储的格式"
+        title: "解析得分 + 准备记忆"
+        desc: "从 LLM 回复中提取分数变化，组装 PowerContext 存储 payload"
         code_language: python3
         code: |
           import json
+          import re
 
-          def main(user_input: str, assistant_response: str, conversation_id: str, dialogue_count: int, user_id: str) -> dict:
+          def main(user_input: str, assistant_response: str, old_score: str, old_round: str, conversation_id: str, user_id: str) -> dict:
+              # 从 LLM 回复中提取本轮得分 (匹配 "本轮得分：X" 或 "本轮得分: X")
+              score_match = re.search(r'本轮得分[：:]\s*(\d+)', assistant_response)
+              new_score = int(old_score)
+              round_num = int(old_round)
+
+              if score_match:
+                  round_score = int(score_match.group(1))
+                  if "挑战" in user_input or "考我" in user_input or "出题" in user_input:
+                      round_num += 1
+                  else:
+                      round_num += 1
+                  new_score += round_score
+
+              # 判断挑战模式状态
+              challenge_mode = "idle"
+              if "挑战" in user_input or "考我" in user_input or "出题" in user_input:
+                  challenge_mode = "questioning"
+              elif score_match:
+                  challenge_mode = "answered"
+
+              # 组装 PowerContext payload
               payload = {
                   "scope": f"user-{user_id}",
                   "messages": [
@@ -219,33 +303,42 @@ graph:
                   ],
                   "metadata": {
                       "conversation_id": conversation_id,
-                      "dialogue_count": dialogue_count,
+                      "score": new_score,
+                      "round": round_num,
+                      "challenge_mode": challenge_mode,
                   }
               }
               return {
                   "json_payload": json.dumps(payload, ensure_ascii=False),
-                  "payload_size": len(payload["messages"]),
+                  "new_score": new_score,
+                  "new_round": round_num,
+                  "challenge_mode": challenge_mode,
               }
         variables:
           - variable: user_input
             value_selector: ["start", "query"]
           - variable: assistant_response
-            value_selector: ["llm_joker", "text"]
+            value_selector: ["llm_core", "text"]
+          - variable: old_score
+            value_selector: ["conversation_variables", "score"]
+          - variable: old_round
+            value_selector: ["conversation_variables", "round"]
           - variable: conversation_id
             value_selector: ["sys", "conversation_id"]
-          - variable: dialogue_count
-            value_selector: ["sys", "dialogue_count"]
           - variable: user_id
             value_selector: ["sys", "user_id"]
         output_schema:
           - variable: json_payload
             type: string
-          - variable: payload_size
+          - variable: new_score
             type: number
+          - variable: new_round
+            type: number
+          - variable: challenge_mode
+            type: string
 
     # ========================================
-    # 6. HTTP Request - 保存对话到 PowerContext
-    #    POST http://localhost:8000/api/v1/memories/remember
+    # 6. HTTP Request - 保存对话 + 分数到 PowerContext
     # ========================================
     - id: "http_save"
       type: "http-request"
@@ -257,7 +350,7 @@ graph:
         y: 480
       data:
         title: "保存记忆到 PowerContext"
-        desc: "把本轮对话保存到 PowerContext 供下次召回"
+        desc: "把本轮对话 + 得分状态存到 PowerContext，跨会话可召回"
         method: "post"
         url: "http://localhost:8000/api/v1/memories/remember"
         headers:
@@ -266,7 +359,7 @@ graph:
         params: []
         body:
           type: "json"
-          data: "{{#code_prepare_memory.json_payload#}}"
+          data: "{{#code_extract.json_payload#}}"
         auth:
           type: "no-auth"
           config: {}
@@ -289,22 +382,22 @@ graph:
       targetType: "http-request"
 
     - source: "http_recall"
-      target: "llm_joker"
+      target: "llm_core"
       sourceType: "http-request"
       targetType: "llm"
 
-    - source: "llm_joker"
+    - source: "llm_core"
       target: "answer"
       sourceType: "llm"
       targetType: "answer"
       edgeType: "answer"
 
-    - source: "llm_joker"
-      target: "code_prepare_memory"
+    - source: "llm_core"
+      target: "code_extract"
       sourceType: "llm"
       targetType: "code"
 
-    - source: "code_prepare_memory"
+    - source: "code_extract"
       target: "http_save"
       sourceType: "code"
       targetType: "http-request"
