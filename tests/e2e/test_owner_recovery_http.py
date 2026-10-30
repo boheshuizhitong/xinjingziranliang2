@@ -297,7 +297,7 @@ def test_offline_migration_preserves_external_owner_evidence(tmp_path, completed
     environment = tmp_path / "offline.env"
     environment.write_text(
         f"POWERCONTEXT_SERVER_DATABASE_KIND=sqlite\n"
-        f"POWERCONTEXT_SERVER_DATABASE_URL=sqlite+aiosqlite:///{tmp_path / 'domain.db'}\n"
+        f"POWERCONTEXT_SERVER_DATABASE_URL=sqlite+aiosqlite:///{(tmp_path / 'domain.db').as_posix()}\n"
         "POWERCONTEXT_SERVER_ACCESS_MODE=disabled\n"
         "POWERCONTEXT_SERVER_ACCESS_DEPLOYMENT_ID=external-test\n"
         "POWERCONTEXT_SERVER_RUNTIME_ARTIFACT_PROCESSING_FAMILIES=[]\n",

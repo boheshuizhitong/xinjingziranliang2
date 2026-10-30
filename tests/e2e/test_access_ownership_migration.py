@@ -609,7 +609,7 @@ def test_background_checks_remain_after_migration_and_cover_profile_writes(tmp_p
 def test_offline_cli_checks_future_background_principal_before_enforcement(tmp_path: Path) -> None:
     from powercontext.server.cli import app as server_cli
 
-    database = SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'cli-background.db'}")
+    database = SQLiteConfig(url=f"sqlite+aiosqlite:///{(tmp_path / 'cli-background.db').as_posix()}")
 
     async def seed() -> str:
         app = create_server_app(settings=_settings(database, "disabled"), scheduler_path=tmp_path / "scheduler.db")
