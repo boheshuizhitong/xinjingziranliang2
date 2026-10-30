@@ -86,24 +86,28 @@ curl --fail \
   "$POWERCONTEXT_URL/v1/memory/search"
 ```
 
-## 通过持久 Operation 执行 flush
+## 检查、取消与重试持久 Operation
 
-Memory flush 可以在当前请求内完成，也可以由任意 Worker 继续执行。不希望等待时，显式请求立即返回句柄：
+Memory 与 Experience 的后台处理是一行行持久化的 Work Ledger operation。它们可以跨进程检查和控制，且只
+暴露给该 Scope 的访问者：
 
-```bash
-curl --fail-with-body --include \
-  --request POST \
-  --header 'Content-Type: application/json' \
-  --header 'Prefer: respond-async' \
-  --header "$POWERCONTEXT_AUTH_HEADER" \
-  --data '{"scope_id":"project:example"}' \
-  "$POWERCONTEXT_URL/v1/memory/flush"
-```
+| 方法与路径 | 作用 | 权限 |
+| --- | --- | --- |
+| `GET /v1/scopes/{scope_id}/operations` | 分页列出该 Scope 的公开 operation，可用 `kind`、`status` 过滤 | `scope.read` |
+| `GET /v1/scopes/{scope_id}/operations/{operation_id}` | 读取一个 operation 的当前状态 | `scope.read` |
+| `POST /v1/scopes/{scope_id}/operations/{operation_id}/cancel` | 请求取消 | `scope.contribute` |
+| `POST /v1/scopes/{scope_id}/operations/{operation_id}/retry` | 为 failed operation 再给一次有界尝试 | `scope.contribute` |
 
-HTTP `200` 返回已经完成的 `FlushMemoryResponse`；HTTP `202` 返回 operation ID，并携带相对 `Location` 和
-`Retry-After` header。`Prefer: wait=N` 最多等待 30 秒。通过 `GET /v1/operations/{operation_id}` 轮询；取消 queued
-或 running operation，以及恢复被阻塞的 failed operation 时，必须把响应中的 `state_version` 作为
-`expected_version` 传回。同一逻辑窗口失败后，后续 flush 返回 `409 operation_blocked`，直到 operator retry 或 cancel。
+取消与重试都必须把读取时的 `state_version` 作为 `expected_version` 传回；`409 operation_conflict` 表示该
+operation 已被并发状态变更抢先，原状态不受影响。running operation 收到取消请求后进入 `cancelling`，在下一次
+fence 停止。成功、失败、取消之后 `state_version` 不再变化，重复读取是安全的。
+
+另一个 Scope 的 operation 与内部 maintenance work 一律返回 `404`：两者既不出现在列表里，也不能通过 ID 探测
+是否存在。
+
+这些 operation 只由 Work Ledger 产生，因此出现在 `distributed` 部署中；`single_node` 仍由 APScheduler
+supervisor 处理 Source 窗口，没有对应的 operation 行。`POST /v1/memory/flush` 目前仍在请求内同步完成并返回
+`200`，不会为 `Prefer: respond-async` 返回可轮询的句柄。
 
 ## Scope 内的操作提示词
 
@@ -211,7 +215,7 @@ Principal，并注入 Authorization Provider。HTTP 与 MCP 使用同一个策�
 | 外部 Skill | `/v1/external-skills/*` | 扫描已配置 target，解析或导入 package |
 | Handoff Report | `/v1/handoff-reports/*` | 按 Scope selection 生成只读报告 |
 | 统计 | `/v1/stats` | 读取指定 scope 的使用统计 |
-| 持久 Operation | `/v1/operations/*` | 检查、列出、取消或恢复 Memory/Experience 后台任务 |
+| 持久 Operation | `/v1/scopes/{scope_id}/operations*` | 检查、列出、取消或恢复 Memory/Experience 后台任务 |
 
 创建 Artifact 使用 `POST /v1/scopes/{scope_id}/artifacts`，在请求体中指定 `family`。
 Profile 的候选审核复用 `/v1/candidates/*`。

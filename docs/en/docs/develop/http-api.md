@@ -93,26 +93,28 @@ curl --fail \
   "$POWERCONTEXT_URL/v1/memory/search"
 ```
 
-## Flush through a durable operation
+## Inspect, cancel and retry durable operations
 
-A Memory flush can finish during the request or continue on any Worker. Ask for an immediate handle when the caller
-does not want to wait:
+Memory and Experience background processing is a row per bounded window in the Work Ledger. Those rows can be
+inspected and controlled across processes, and only for the Scope that owns them:
 
-```bash
-curl --fail-with-body --include \
-  --request POST \
-  --header 'Content-Type: application/json' \
-  --header 'Prefer: respond-async' \
-  --header "$POWERCONTEXT_AUTH_HEADER" \
-  --data '{"scope_id":"project:example"}' \
-  "$POWERCONTEXT_URL/v1/memory/flush"
-```
+| Method and path | Purpose | Access |
+| --- | --- | --- |
+| `GET /v1/scopes/{scope_id}/operations` | Page the Scope's public operations, optionally filtered by `kind` and `status` | `scope.read` |
+| `GET /v1/scopes/{scope_id}/operations/{operation_id}` | Read one operation's current state | `scope.read` |
+| `POST /v1/scopes/{scope_id}/operations/{operation_id}/cancel` | Request cancellation | `scope.contribute` |
+| `POST /v1/scopes/{scope_id}/operations/{operation_id}/retry` | Grant one fresh bounded attempt to a failed operation | `scope.contribute` |
 
-HTTP `200` contains the completed `FlushMemoryResponse`. HTTP `202` contains an operation ID and includes relative
-`Location` and `Retry-After` headers. `Prefer: wait=N` waits up to 30 seconds. Poll
-`GET /v1/operations/{operation_id}`; use the returned `state_version` as `expected_version` when cancelling a queued or
-running operation, or retrying a blocked failed operation. A failed logical window returns `409 operation_blocked` on
-another flush until an operator retries or cancels it.
+Cancel and retry must send the `state_version` that was read as `expected_version`; `409 operation_conflict` means a
+concurrent transition won and the original state is preserved. A running operation moves to `cancelling` and stops at
+its next fence. After success, failure or cancellation `state_version` stops changing, so repeated reads are safe.
+
+An operation owned by another Scope, and internal maintenance work, both return `404`: neither is listed, and neither
+can be probed by id.
+
+These operations come from the Work Ledger, so they appear in a `distributed` deployment; a `single_node` install keeps
+processing Source windows through the APScheduler supervisor and has no such rows. `POST /v1/memory/flush` still
+completes inside the request with `200` and does not return a pollable handle for `Prefer: respond-async`.
 
 ## Scope-owned operational Prompts
 
@@ -232,7 +234,7 @@ use the same policy enforcement point; MCP tool visibility is not permission.
 | External Skills | `/v1/external-skills/*` | Scan configured targets and resolve or import packages |
 | Handoff Reports | `/v1/handoff-reports/*` | Generate a read-only report for a Scope selection |
 | Statistics | `/v1/stats` | Read scoped usage statistics |
-| Durable operations | `/v1/operations/*` | Inspect, list, cancel, or recover Memory and Experience background work |
+| Durable operations | `/v1/scopes/{scope_id}/operations*` | Inspect, list, cancel, or recover Memory and Experience background work |
 
 Create an Artifact with `POST /v1/scopes/{scope_id}/artifacts`, specifying `family` in the request body.
 Profile candidate review uses `/v1/candidates/*`.

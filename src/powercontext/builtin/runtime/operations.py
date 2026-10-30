@@ -31,12 +31,18 @@ from powercontext.builtin.persistence.work import StoredWork, WorkRepository, Wo
 from powercontext.builtin.runtime.config import OperationsConfig, WorkerConfig
 from powercontext.builtin.runtime.protocols import RuntimeSpan, RuntimeTracing
 from powercontext.builtin.runtime.relational import RelationalContexts
-from powercontext.builtin.runtime.work_handlers import EXPERIENCE_WORK_KIND
+from powercontext.builtin.runtime.work_handlers import (
+    EXPERIENCE_WORK_KIND,
+    MEMORY_WORK_KIND,
+    PROFILE_WORK_KIND,
+)
 from powercontext.builtin.runtime.work_observability import WorkObserver, refresh_work_queue
 from powercontext.builtin.runtime.worker import DurableWorker
 
 _TERMINAL = frozenset({WorkStatus.SUCCEEDED, WorkStatus.FAILED, WorkStatus.CANCELLED})
-_PUBLIC_KINDS = frozenset({EXPERIENCE_WORK_KIND})
+# Scope owners may inspect, cancel and retry the work their own Sources produced.
+# Maintenance work stays private: it is neither listed nor reachable by id.
+_PUBLIC_KINDS = frozenset({MEMORY_WORK_KIND, PROFILE_WORK_KIND, EXPERIENCE_WORK_KIND})
 
 
 @dataclass(frozen=True)

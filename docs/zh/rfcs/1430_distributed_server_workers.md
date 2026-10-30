@@ -142,6 +142,12 @@ attempt。无法识别的 payload version 保持在 lane head 可见，并使 Wo
 公开状态为 `queued`、`running`、`retry_wait`、`cancelling`、`succeeded`、`failed`、`cancelled`。内部 maintenance work
 不会通过 Operation API 暴露。
 
+本次变更的实现状态：Operation API 挂在所属 Scope 下（`GET|POST /v1/scopes/{scope_id}/operations[...]`），授权直接
+从请求解析，属于其它 Scope 的 operation 与 maintenance work 一样返回 `404`。乐观并发 cancel、operator retry、七个
+公开状态与 maintenance 白名单已实现。仍处于提案、尚未实现的部分：`202 OperationAccepted` 句柄、`Prefer:
+respond-async` / `Prefer: wait=N`、失败窗口导致的 `409 operation_blocked`，以及客户端
+`submit_memory_flush()` 与轮询辅助方法。在这些落地之前，`POST /v1/memory/flush` 仍同步返回 `200`。
+
 `PowerContextClient.flush_memory()` 通过 submit + poll 保持原有同步式返回；总 deadline 到期时抛出携带 operation ID 的
 `OperationPendingError`。需要显式控制的调用方使用 `submit_memory_flush()`、`get_operation()`、`list_operations()`、
 `cancel_operation()` 和 `retry_operation()`。

@@ -157,6 +157,14 @@ bodies carry `expected_version`; illegal or stale transitions return `409`. Publ
 `running`, `retry_wait`, `cancelling`, `succeeded`, `failed`, and `cancelled`. Internal maintenance work is not exposed by
 the Operation API.
 
+Implementation status in this change: the Operation API is served under the owning Scope
+(`GET|POST /v1/scopes/{scope_id}/operations[...]`), so authorization resolves from the request and a row belonging to
+another Scope reads as `404` exactly like maintenance work. Optimistic cancel and operator retry, the seven public
+states, and the maintenance whitelist are implemented. Still proposed and not implemented: the `202 OperationAccepted`
+handle, `Prefer: respond-async` / `Prefer: wait=N`, `409 operation_blocked` from a blocking failed window, and the
+client `submit_memory_flush()` / polling helpers. Until those land, `POST /v1/memory/flush` keeps answering `200`
+synchronously.
+
 `PowerContextClient.flush_memory()` preserves its synchronous-looking result by submitting and polling until its total
 deadline. If that deadline expires it raises `OperationPendingError` with the operation ID. Callers that want explicit
 control use `submit_memory_flush()`, `get_operation()`, `list_operations()`, `cancel_operation()`, and
