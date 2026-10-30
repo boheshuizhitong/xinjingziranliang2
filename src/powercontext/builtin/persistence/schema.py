@@ -23,11 +23,16 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncConnection
 from sqlalchemy.schema import CreateTable, sort_tables
 
+from powercontext.builtin.persistence.atomic_memory_evidence_schema import ATOMIC_MEMORY_EVIDENCE_TABLES
 from powercontext.builtin.persistence.bootstrap import mysql_error_code
+from powercontext.builtin.persistence.migrations.atomic_memory_evidence import apply_atomic_memory_evidence_migration
 
 
 async def create_tables(connection: AsyncConnection, tables: Sequence[Table], /) -> None:
-    """Create selected tables only for unmanaged storage; managed schemas are read-only."""
+    """Create selected tables only for unmanaged storage; managed schemas are read-only.
+
+    Evidence tables are applied only through their registered additive migration.
+    """
 
     names = await connection.run_sync(lambda sync: set(inspect(sync).get_table_names()))
     if "pc_schema_revision" in names:
@@ -43,7 +48,12 @@ async def create_tables(connection: AsyncConnection, tables: Sequence[Table], /)
         return
 
     groups: dict[MetaData, list[Table]] = {}
+    evidence_names = {table.name for table in ATOMIC_MEMORY_EVIDENCE_TABLES}
+    if any(table.name in evidence_names or table.name == "pc_sources" for table in tables):
+        await apply_atomic_memory_evidence_migration(connection)
     for table in tables:
+        if table.name in evidence_names:
+            continue
         groups.setdefault(table.metadata, []).append(table)
 
     for metadata, selected in groups.items():
