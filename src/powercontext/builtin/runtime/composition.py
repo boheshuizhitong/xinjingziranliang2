@@ -964,10 +964,17 @@ async def open_builtin_contexts(
                 await contexts.aclose_usage_recorder()
         return
     experience_index = OceanBaseExperienceFTSIndex()
-    indexes = [OceanBaseMemoryFTSIndex()]
-    if embedding_model is not None:
-        indexes.append(OceanBaseMemoryVectorIndex(embedding_model.profile))
-    index = CompositeMemoryIndex(*indexes)
+    fts_index = OceanBaseMemoryFTSIndex()
+    vector_index = OceanBaseMemoryVectorIndex(embedding_model.profile) if embedding_model is not None else None
+    if isinstance(database, SeekDBConfig) and vector_index is not None:
+        from powercontext.builtin.persistence.seekdb.memory_index import SeekDBHybridMemoryIndex
+
+        index = SeekDBHybridMemoryIndex(fts_index, vector_index)
+    else:
+        _indexes = [fts_index]
+        if vector_index is not None:
+            _indexes.append(vector_index)
+        index = CompositeMemoryIndex(*_indexes)
     topic_indexes: list[TopicMemoryIndex] = [OceanBaseTopicMemoryFTSIndex()]
     if embedding_model is not None:
         topic_indexes.append(OceanBaseTopicMemoryVectorIndex(embedding_model.profile))
