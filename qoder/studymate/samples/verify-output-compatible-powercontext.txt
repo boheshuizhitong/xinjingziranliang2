@@ -5,7 +5,7 @@
 ✅ 服务健康：seekdb 嵌入式就绪 
 ✅ 服务健康：PowerContext 已连接 (http://127.0.0.1:8010)
 ✅ 知识库初始化并导入示例数据 （导入 18 条，共 18 条）
-✅ PowerContext Scope 创建成功 (scope_id=studymate-1793427805)
+✅ PowerContext Scope 创建成功 (scope_id=studymate-1793431037)
 ✅ 混合检索：“杨氏双缝实验怎么算条纹间距” → 首位命中《光的干涉与杨氏双缝实验》 [both]
 ✅ 混合检索：“英语作文怎么避免抄原文” → 首位命中《paraphrase：英语写作改写技巧》 [both]
 ✅ 混合检索：“气温对声速有什么影响” → 首位命中《声速测量（驻波法）》 [semantic]
