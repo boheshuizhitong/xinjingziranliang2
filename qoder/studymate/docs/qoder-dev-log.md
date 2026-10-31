@@ -11,7 +11,7 @@
 
 | 项 | 内容 |
 | --- | --- |
-| Qoder 账号 UID | **[在此填写你的 Qoder 账号 UID]** |
+| Qoder 账号 UID | **01a190e2-d0da-7976-9ac9-5757385c16b6** |
 | 开发环境 | Qoder 桌面端 / IDE |
 | 站点发布 | Qoder Sites（见 `docs/qoder-sites.md`） |
 
