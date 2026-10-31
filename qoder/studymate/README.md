@@ -48,7 +48,17 @@ python samples\verify.py --reset    # 17 项断言：健康/初始化/混合检�
 - 官方 PowerContext：[samples/verify-output-official-powercontext.txt](samples/verify-output-official-powercontext.txt)（17/17）
 - 离线兼容实现：[samples/verify-output-compatible-powercontext.txt](samples/verify-output-compatible-powercontext.txt)（17/17）
 
-样例说明见 **[samples/verify.md](samples/verify.md)**。运行演示截图见 `docs/screenshots/`。
+样例说明见 **[samples/verify.md](samples/verify.md)**。
+
+## 运行演示（截图）
+
+| 场景 | 截图 |
+| --- | --- |
+| 知识库混合检索（首位命中 + 命中方式） | ![检索](docs/screenshots/01-search-demo.png) |
+| 跨会话记忆召回（"我记得你…"） | ![记忆召回](docs/screenshots/02-memory-recall-demo.png) |
+| 今日复习计划（薄弱点 + 资料匹配） | ![复习计划](docs/screenshots/03-review-plan-demo.png) |
+| PowerContext 记忆（三类记忆） | ![记忆](docs/screenshots/04-memory-demo.png) |
+| 知识库（18 条示例） | ![知识库](docs/screenshots/05-knowledge-base-demo.png) |
 
 ## 五、项目结构
 
