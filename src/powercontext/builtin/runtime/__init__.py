@@ -110,6 +110,10 @@ from powercontext.builtin.runtime.decision_model import (
     StructuredDecisionModel,
 )
 from powercontext.builtin.runtime.errors import InvalidRuntimeRequestError, TopicMemoryProcessingUnavailableError
+from powercontext.builtin.runtime.source_lifecycle import (
+    SourceLifecycleError,
+    SourceLifecycleEvent,
+)
 from powercontext.builtin.runtime.memory_write_gate import (
     DecisionMemoryWriteGate,
     MemoryWriteAssessment,
@@ -383,4 +387,6 @@ __all__ = [
     "open_builtin_contexts",
     "open_builtin_runtime",
     "preflight_builtin_runtime",
+    "SourceLifecycleError",
+    "SourceLifecycleEvent",
 ]

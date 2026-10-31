@@ -2706,6 +2706,20 @@ class ScopedTopicMemoryApplication:
                         "unit": "topic-memory",
                     },
                 )
+        # Filter out topics that have been withdrawn by the source lifecycle.
+        lifecycle = getattr(self._runtime, "lifecycle", None)
+        if lifecycle is not None and result.hits:
+            svc = lifecycle.for_scope(self.scope_id)
+            await svc._ensure_loaded()
+            inactive = svc.inactive_topic_refs()
+            if inactive:
+                filtered = tuple(
+                    hit
+                    for hit in result.hits
+                    if (hit.artifact_ref.family, hit.artifact_ref.artifact_id, hit.artifact_ref.revision)
+                    not in inactive
+                )
+                result = result.model_copy(update={"hits": filtered})
         return result
 
     async def _search_with_embedding(
@@ -3134,6 +3148,9 @@ class BuiltinRuntime:
         self.memory = MemoryApplication(self)
         self.topic_memory = TopicMemoryApplication(self)
         self.records = RecordApplication(self)
+        from powercontext.builtin.runtime.source_lifecycle import LifecycleApplication
+
+        self.lifecycle = LifecycleApplication(self, provider.database)
         self.prompts = PromptApplication(self)
         self.review = ReviewApplication(self)
         self.skill = SkillApplication(self)
