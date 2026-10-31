@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>学伴 StudyMate · 越用越懂你的学习记忆助手</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>📚 学伴 StudyMate</h1>
+    <div class="sub">seekdb 知识库混合检索 × PowerContext 跨会话记忆 —— 你的个人复习教练</div>
+  </div>
+  <div class="badges">
+    <span class="badge" id="bd-seekdb">seekdb: 检测中</span>
+    <span class="badge" id="bd-pc">PowerContext: 检测中</span>
+  </div>
+</header>
+
+<nav>
+  <button data-tab="ask" class="active">问答</button>
+  <button data-tab="kb">知识库</button>
+  <button data-tab="plan">复习计划</button>
+  <button data-tab="memory">记忆</button>
+</nav>
+
+<main>
+  <!-- ======================= 问答 ======================= -->
+  <section id="tab-ask" class="tab active">
+    <div class="card">
+      <div class="row" style="margin-bottom:10px;">
+        <input type="text" id="ask-input" placeholder="问点什么，比如：杨氏双缝实验怎么算条纹间距？" style="flex:1;">
+        <select id="ask-course" style="width:110px;">
+          <option value="">全部学科</option>
+          <option>物理</option>
+          <option>高数</option>
+          <option>电路</option>
+          <option>英语</option>
+          <option>文献</option>
+        </select>
+        <button class="btn" id="ask-btn">提问</button>
+      </div>
+      <div id="chat">
+        <div class="msg bot">你好，我是学伴 👋 我可以结合你的学习记忆（PowerContext）和知识库（seekdb 混合检索）回答复习问题。试试问上面的问题，或让我生成一份今日复习计划。</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= 知识库 ======================= -->
+  <section id="tab-kb" class="tab">
+    <div class="card">
+      <h3>知识库检索（seekdb：向量 + ik 全文 + 学科过滤）</h3>
+      <div class="row">
+        <input type="search" id="kb-q" placeholder="输入检索词，如：双缝 干涉 或 laser" style="flex:1;">
+        <select id="kb-course" style="width:110px;">
+          <option value="">全部学科</option>
+          <option>物理</option>
+          <option>高数</option>
+          <option>电路</option>
+          <option>英语</option>
+          <option>文献</option>
+        </select>
+        <button class="btn" id="kb-search-btn">混合检索</button>
+      </div>
+      <div class="muted" style="margin-top:8px;">检索结果标注命中方式：语义命中（向量）/ 关键词命中（全文）/ 双命中。</div>
+      <div id="kb-results" style="margin-top:10px;"></div>
+    </div>
+
+    <div class="grid2">
+      <div class="card">
+        <h3>📁 笔记列表</h3>
+        <div class="muted" id="kb-stats"></div>
+        <div id="kb-list" style="margin-top:8px;"></div>
+      </div>
+      <div class="card">
+        <h3>✏️ 添加笔记</h3>
+        <div class="row" style="margin-bottom:8px;">
+          <input type="text" id="note-title" placeholder="标题" style="flex:1;">
+          <select id="note-course" style="width:110px;">
+            <option>物理</option><option>高数</option><option>电路</option>
+            <option>英语</option><option>文献</option>
+          </select>
+        </div>
+        <textarea id="note-content" placeholder="笔记内容（纯文本，支持中文）"></textarea>
+        <div class="row" style="margin-top:8px;">
+          <input type="text" id="note-source" placeholder="出处（可选，如：大物笔记 P23）" style="flex:1;">
+          <button class="btn" id="note-add">入库</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= 复习计划 ======================= -->
+  <section id="tab-plan" class="tab">
+    <div class="card">
+      <h3>🗓 今日复习计划 <span class="muted" id="plan-summary"></span></h3>
+      <p class="muted" style="margin-bottom:10px;">由 PowerContext 记忆（薄弱知识点/复习进度）调度，并自动到 seekdb 知识库匹配复习资料。</p>
+      <div id="plan-list"></div>
+      <button class="btn ghost" id="plan-refresh">重新生成</button>
+    </div>
+    <div class="card">
+      <h3>⚠️ 记录薄弱知识点（写入 PowerContext 记忆）</h3>
+      <div class="row">
+        <input type="text" id="weak-topic" placeholder="知识点，如：傅里叶变换的物理意义" style="flex:1;">
+        <select id="weak-course" style="width:110px;">
+          <option value="">未分类</option><option>物理</option><option>高数</option>
+          <option>电路</option><option>英语</option><option>文献</option>
+        </select>
+        <button class="btn" id="weak-btn">记录</button>
+      </div>
+      <input type="text" id="weak-detail" placeholder="具体卡在哪（可选）" style="margin-top:8px;">
+    </div>
+  </section>
+
+  <!-- ======================= 记忆 ======================= -->
+  <section id="tab-memory" class="tab">
+    <div class="grid2">
+      <div class="card">
+        <h3>🧠 PowerContext 记忆</h3>
+        <div id="mem-list"></div>
+      </div>
+      <div>
+        <div class="card">
+          <h3>🎯 学习偏好</h3>
+          <div class="row">
+            <input type="text" id="pref-text" placeholder="如：我喜欢先做错题再背单词" style="flex:1;">
+            <button class="btn" id="pref-btn">记住</button>
+          </div>
+          <div id="pref-list" style="margin-top:10px;"></div>
+        </div>
+        <div class="card">
+          <h3>🔍 检索调试日志（评审核对用）</h3>
+          <pre class="log" id="debug-log">等待操作…</pre>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>

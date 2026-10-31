@@ -1,0 +1,17 @@
+# 学伴 StudyMate —— 运行依赖
+# Python 3.11+（Windows/Linux/macOS 均可）
+
+# --- Web 框架 ---
+fastapi>=0.111
+uvicorn>=0.30
+
+# --- seekdb 嵌入式（知识库存储与混合检索）---
+# pylibseekdb: seekdb 的 Python 原生绑定（嵌入式模式，启动本地数据库）
+pylibseekdb>=1.4.0
+# pymysql: 通过 MySQL 协议连接嵌入式 seekdb 并执行 SQL
+pymysql>=1.1
+# pyseekdb: 高层客户端（本项目仅使用其 OnnxEmbeddingFunction 做本地中文向量化）
+pyseekdb>=1.4.0
+
+# --- 其他 ---
+python-multipart>=0.0.9
