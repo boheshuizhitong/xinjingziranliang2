@@ -3,6 +3,9 @@
 > 本赛道要求：项目主要开发工作必须在 Qoder 中完成，并保留关键环节的对话截图/录屏，
 > 附 **Qoder 账号 UID** 以核对站点归属与使用记录。
 > 以下表格记录各开发环节；截图位请在对应表格行插入 Qoder 对话截图。
+> 本项目应用运行演示截图（评审可先用 `samples/verify.md` 复现，再查看本站截图核对）：
+> `docs/screenshots/01-search-demo.png`（检索）、`02-memory-recall-demo.png`（跨会话记忆召回）、
+> `03-review-plan-demo.png`（复习计划）、`04-memory-demo.png`（PowerContext 记忆）、`05-knowledge-base-demo.png`（知识库）。
 
 ## Qoder 账号
 
