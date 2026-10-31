@@ -47,6 +47,7 @@ else:
     from multiprocessing.popen_spawn_posix import Popen as SpawnPopen
 
 from powercontext._logging import log_safely
+from powercontext.builtin.persistence.cursors import SourceCursorRepository
 from powercontext.builtin.persistence.database import AsyncDatabase
 from powercontext.builtin.persistence.errors import ArtifactProcessingLeadershipLostError
 from powercontext.builtin.persistence.processing_intents import ArtifactProcessingIntentRepository
@@ -57,7 +58,11 @@ from powercontext.builtin.persistence.supervision import (
     ArtifactProcessingLeaseRepository,
     database_utc_now,
 )
-from powercontext.builtin.persistence.tables import ARTIFACT_PROCESSING_INTENTS_TABLE, ARTIFACT_PROCESSING_LEASES_TABLE
+from powercontext.builtin.persistence.tables import (
+    ARTIFACT_PROCESSING_INTENTS_TABLE,
+    ARTIFACT_PROCESSING_LEASES_TABLE,
+    SOURCE_JOURNAL_HEADS_TABLE,
+)
 from powercontext.builtin.runtime.processing_contracts import (
     ArtifactProcessingWorkAssignment,
     ArtifactProcessingWorkerCompletion,
@@ -117,6 +122,9 @@ class ArtifactProcessingBinding:
     # Only automatic admission is filtered; already accepted requests retain
     # their own Worker authorization and domain completion semantics.
     automatic_scope_filter: Callable[[AsyncConnection, tuple[str, ...]], Awaitable[frozenset[str]]] | None = None
+    # Admit one automatic invocation when the Source journal grows this many
+    # entries past the last successful cursor, independent of the schedule.
+    min_pending_sources: int | None = None
 
     def __post_init__(self) -> None:
         if not self.binding_name or self.binding_name != self.binding_name.strip():
@@ -138,6 +146,10 @@ class ArtifactProcessingBinding:
                 raise ValueError("interval and cron cannot both be enabled")  # noqa: TRY003
         if self.cron is not None:
             CronTrigger.from_crontab(self.cron, timezone=ZoneInfo(self.timezone))
+        if self.min_pending_sources is not None and (
+            type(self.min_pending_sources) is not int or self.min_pending_sources < 1
+        ):
+            raise ValueError("min_pending_sources must be a positive integer or None")  # noqa: TRY003
 
 
 class _WorkerResultSender(Protocol):
@@ -656,6 +668,38 @@ class ArtifactProcessingSupervisor:
         else:
             await self._discover_requested(state)
             await self._discover_automatic(state)
+        # Count-threshold admission runs every cycle, independent of the schedule.
+        await self._discover_count_triggered(state)
+
+    async def _discover_count_triggered(self, state: _FamilyState) -> None:
+        threshold = state.binding.min_pending_sources
+        if threshold is None:
+            return
+        capacity = self._fresh_capacity(state)
+        if capacity <= 0:
+            return
+        async with self._database.transaction() as connection:
+            await self._leases.require_fence(connection, self._require_current_fence())
+            heads = SOURCE_JOURNAL_HEADS_TABLE
+            rows = (
+                await connection.execute(
+                    select(heads.c.scope_id, heads.c.position)
+                    .order_by(heads.c.scope_id)
+                    .limit(min(capacity, _DISCOVERY_PAGE_SIZE))
+                )
+            ).all()
+            cursors = SourceCursorRepository()
+            for scope, high in rows:
+                if len(state.ready) >= capacity:
+                    break
+                if scope in state.queued or scope in state.running or scope in state.retries:
+                    continue
+                cursor = await cursors.load(connection, scope, state.binding.binding_name)
+                processed = 0 if cursor is None else cursor.cursor.sequence
+                if int(high) - processed < threshold:
+                    continue
+                await self._intents.request(connection, scope, state.binding.binding_name)
+                self._enqueue(state, scope)
 
     async def _discover_requested(self, state: _FamilyState) -> None:
         capacity = self._fresh_capacity(state)
@@ -1093,6 +1137,8 @@ class ArtifactProcessingSupervisor:
                 continue
             if state.next_schedule_at is not None:
                 deadlines.append(state.next_schedule_at)
+            if state.binding.min_pending_sources is not None:
+                deadlines.append(now + self._tick)
             if state.discovery_pending or state.scan_in_progress or not state.reconcile_complete or state.degraded:
                 deadlines.append(max(now, state.next_discovery_at))
         return None if not deadlines else max(0.001, min(deadlines) - now)
