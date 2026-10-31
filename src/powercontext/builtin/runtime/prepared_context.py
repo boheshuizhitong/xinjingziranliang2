@@ -106,6 +106,17 @@ class PreparedContextBuild:
     origins: tuple[PreparedContextOrigin, ...]
     omissions: PreparedContextOmissions = PreparedContextOmissions()
     code_origins: tuple[CodeEvidenceRef, ...] = ()
+    fragments: tuple[PreparedContextFragment, ...] = ()
+
+
+@dataclass(frozen=True)
+class PreparedContextFragment:
+    """One contiguous slice of a Memory entry selected as evidence."""
+
+    address: MemoryEntryAddress
+    start: int
+    end: int
+    text: str
 
 
 @dataclass(frozen=True)
@@ -228,6 +239,13 @@ class PreparedContextBuilder:
 
             return assemble_code(request, code_candidates, self.entry_limit, historical)
 
+        if request.evidence_selection:
+            return self._build_evidence_selection(
+                request=request,
+                current_scope_id=current_scope_id,
+                memory_candidates=memory_candidates,
+            )
+
         if sum(len(candidates.hits) for candidates in memory_candidates) > self.memory_candidate_limit:
             raise PreparedContextInvariantError("memory-candidate-limit")
         if len(topic_memory_hits) > self.topic_memory_candidate_limit:
@@ -254,6 +272,107 @@ class PreparedContextBuilder:
             context=PreparedContext(status="ready", content=content, content_bytes=content_bytes),
             origins=origins,
             omissions=omissions,
+        )
+
+    def _build_evidence_selection(
+        self,
+        *,
+        request: PrepareContextRequest,
+        current_scope_id: str | None,
+        memory_candidates: Sequence[PreparedMemoryCandidates],
+    ) -> PreparedContextBuild:
+        """Select query-relevant fragments from memory entry texts within the byte budget."""
+        import re
+
+        query_terms = set(re.findall(r"[a-z]+|\d+", request.query.lower()))
+        if not query_terms:
+            return PreparedContextBuild(context=self.empty(), origins=(), fragments=())
+
+        fragments: list[PreparedContextFragment] = []
+        origins: list[PreparedContextOrigin] = []
+        items: list[dict[str, object]] = []
+
+        # Build envelope skeleton to know fixed overhead bytes.
+        def _render_envelope(entries: list[dict[str, object]]) -> str:
+            envelope = {"trust": "untrusted_history", "items": entries}
+            encoded = json.dumps(envelope, ensure_ascii=False, separators=(",", ":"))
+            return "\n\n".join((TRUST_POLICY, f"{_BEGIN_MARKER}\n{encoded}\n{_END_MARKER}"))
+
+        skeleton_bytes = len(_render_envelope([]).encode("utf-8"))
+        remaining = request.max_bytes - skeleton_bytes
+
+        for candidates in memory_candidates:
+            if not candidates.hits or candidates.memory_ref is None:
+                continue
+            for hit in candidates.hits:
+                if hit.memory_ref != candidates.memory_ref:
+                    continue
+                text = hit.text
+                if not text.strip():
+                    continue
+                scope_id = candidates.scope_id or current_scope_id
+                memory_address = ArtifactAddress(scope_id=scope_id, artifact=hit.memory_ref)
+                address = MemoryEntryAddress(
+                    memory=memory_address,
+                    entry_id=hit.entry_id,
+                    entry_version_id=hit.entry_version_id,
+                )
+
+                # Find sentence-like chunks containing query terms.
+                # Split on sentence boundaries while preserving positions.
+                chunks = list(re.finditer(r"[^.!?\n]+[.!?\n]*", text))
+                scored: list[tuple[int, int, int]] = []
+                for m in chunks:
+                    chunk_text = m.group()
+                    terms = set(re.findall(r"[a-z]+|\d+", chunk_text.lower()))
+                    score = len(terms & query_terms)
+                    if score > 0:
+                        scored.append((score, m.start(), m.end()))
+                # Sort by score desc, then by position asc (prefer earlier in doc for ties
+                # is NOT what we want — we want most relevant first regardless of position).
+                scored.sort(key=lambda x: (-x[0], x[1]))
+
+                for score, start, end in scored:
+                    chunk_text = text[start:end]
+                    # Estimate item bytes.
+                    citation = {
+                        "scope_id": scope_id,
+                        "memory_ref": hit.memory_ref.model_dump(mode="json"),
+                        "entry_id": hit.entry_id,
+                        "entry_version_id": hit.entry_version_id,
+                    }
+                    probe_item = {
+                        "citation": citation,
+                        "content": chunk_text,
+                        "start": start,
+                        "end": end,
+                    }
+                    item_bytes = len(
+                        json.dumps(probe_item, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+                    )
+                    # Add a few bytes for comma separators between items.
+                    cost = item_bytes + 1
+                    if cost > remaining:
+                        # Try a shorter window around the matched terms.
+                        continue
+                    fragments.append(
+                        PreparedContextFragment(
+                            address=address, start=start, end=end, text=chunk_text
+                        )
+                    )
+                    origins.append(address)
+                    items.append(probe_item)
+                    remaining -= cost
+
+        if not items:
+            return PreparedContextBuild(context=self.empty(), origins=(), fragments=())
+
+        content = _render_envelope(items)
+        content_bytes = len(content.encode("utf-8"))
+        return PreparedContextBuild(
+            context=PreparedContext(status="ready", content=content, content_bytes=content_bytes),
+            origins=tuple(origins),
+            fragments=tuple(fragments),
         )
 
     def probe_budget(
