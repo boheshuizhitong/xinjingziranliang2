@@ -1,0 +1,19 @@
+# 虚拟环境
+.venv/
+venv/
+
+# 运行时数据（seekdb 资料库、PowerContext 记忆、scope 文件）
+data/
+
+# 凭据（绝不提交）
+.env
+
+# Python 缓存
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# 编辑器/系统
+.idea/
+.vscode/
+.DS_Store

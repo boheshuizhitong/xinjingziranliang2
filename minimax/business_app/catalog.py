@@ -1,0 +1,69 @@
+"""业务工程：商品目录查询服务（v2，支持价格区间筛选与边界校验）
+
+当前支持按 `category`、`in_stock_only`、`min_price` 与 `max_price` 四个条件过滤商品。
+新增功能：
+  - min_price / max_price 价格区间筛选；
+  - 边界输入校验（负数、min>max 抛 ValueError）。
+该修改由 MiniMax 基于上下文模块提供的开发上下文完成。
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Iterable, Optional
+
+
+@dataclass(frozen=True)
+class Product:
+    """商品。price/stock 均为非负（规格不变式）。"""
+    id: int
+    name: str
+    category: str
+    price: float
+    in_stock: bool
+    stock: int
+
+
+def search_products(
+    products: Iterable[Product],
+    category: Optional[str] = None,
+    in_stock_only: bool = False,
+    min_price: Optional[float] = None,
+    max_price: Optional[float] = None,
+) -> list[Product]:
+    """按条件筛选商品。
+
+    过滤语义（规格 v2，见 specs/product_spec_v2.md）：
+      - category 指定时，仅保留该分类商品；
+      - in_stock_only=True 时，仅保留 in_stock 为真且 stock>0 的商品；
+      - min_price 指定时，仅保留 price >= min_price 的商品；
+      - max_price 指定时，仅保留 price <= max_price 的商品；
+      - min_price 和 max_price 同时指定时，取两者交集；
+      - min_price == max_price 时，返回价格恰好等于该值的商品；
+      - 未指定条件时返回全部商品；
+      - 结果保持输入顺序，不修改输入。
+    """
+    # 边界输入校验
+    if min_price is not None:
+        if min_price < 0:
+            raise ValueError("min_price 不能为负数")
+        min_price = float(min_price)
+    if max_price is not None:
+        if max_price < 0:
+            raise ValueError("max_price 不能为负数")
+        max_price = float(max_price)
+    if min_price is not None and max_price is not None:
+        if min_price > max_price:
+            raise ValueError("min_price 不能大于 max_price")
+    
+    result: list[Product] = []
+    for p in products:
+        if category is not None and p.category != category:
+            continue
+        if in_stock_only and not (p.in_stock and p.stock > 0):
+            continue
+        if min_price is not None and p.price < min_price:
+            continue
+        if max_price is not None and p.price > max_price:
+            continue
+        result.append(p)
+    return result

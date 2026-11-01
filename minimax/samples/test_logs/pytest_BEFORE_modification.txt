@@ -1,0 +1,84 @@
+FFFFFFFF.....                                                            [100%]
+================================== FAILURES ===================================
+___________________________ test_price_range_filter ___________________________
+
+    def test_price_range_filter():
+        """min_price/max_price 都指定时按区间过滤（39、1999、99 被排除）。"""
+>       out = search_products(_sample(), min_price=100.0, max_price=1500.0)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       TypeError: search_products() got an unexpected keyword argument 'min_price'
+
+business_app\tests\test_catalog.py:36: TypeError
+________________________ test_min_equals_max_boundary _________________________
+
+    def test_min_equals_max_boundary():
+        """min_price == max_price 时返回价格恰好等于该值的商品（闭区间边界）。"""
+>       out = search_products(_sample(), min_price=129.0, max_price=129.0)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       TypeError: search_products() got an unexpected keyword argument 'min_price'
+
+business_app\tests\test_catalog.py:42: TypeError
+_____________________________ test_only_min_price _____________________________
+
+    def test_only_min_price():
+        """只给 min_price 时，上限不限制。"""
+>       out = search_products(_sample(), min_price=1300.0)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       TypeError: search_products() got an unexpected keyword argument 'min_price'
+
+business_app\tests\test_catalog.py:48: TypeError
+_____________________________ test_only_max_price _____________________________
+
+    def test_only_max_price():
+        """只给 max_price 时，下限不限制。"""
+>       out = search_products(_sample(), max_price=40.0)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       TypeError: search_products() got an unexpected keyword argument 'max_price'
+
+business_app\tests\test_catalog.py:54: TypeError
+__________________ test_price_filter_combined_with_category ___________________
+
+    def test_price_filter_combined_with_category():
+        """价格筛选与既有 category 过滤叠加。"""
+>       out = search_products(_sample(), category="显示", min_price=100.0, max_price=1500.0)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       TypeError: search_products() got an unexpected keyword argument 'min_price'
+
+business_app\tests\test_catalog.py:60: TypeError
+______________________ test_negative_min_price_rejected _______________________
+
+    def test_negative_min_price_rejected():
+        """min_price < 0 必须抛 ValueError。"""
+        with pytest.raises(ValueError):
+>           search_products(_sample(), min_price=-1.0)
+E           TypeError: search_products() got an unexpected keyword argument 'min_price'
+
+business_app\tests\test_catalog.py:67: TypeError
+______________________ test_negative_max_price_rejected _______________________
+
+    def test_negative_max_price_rejected():
+        """max_price < 0 必须抛 ValueError。"""
+        with pytest.raises(ValueError):
+>           search_products(_sample(), max_price=-0.5)
+E           TypeError: search_products() got an unexpected keyword argument 'max_price'
+
+business_app\tests\test_catalog.py:73: TypeError
+__________________________ test_min_gt_max_rejected ___________________________
+
+    def test_min_gt_max_rejected():
+        """min_price > max_price 必须抛 ValueError。"""
+        with pytest.raises(ValueError):
+>           search_products(_sample(), min_price=500.0, max_price=100.0)
+E           TypeError: search_products() got an unexpected keyword argument 'min_price'
+
+business_app\tests\test_catalog.py:79: TypeError
+=========================== short test summary info ===========================
+FAILED business_app/tests/test_catalog.py::test_price_range_filter - TypeErro...
+FAILED business_app/tests/test_catalog.py::test_min_equals_max_boundary - Typ...
+FAILED business_app/tests/test_catalog.py::test_only_min_price - TypeError: s...
+FAILED business_app/tests/test_catalog.py::test_only_max_price - TypeError: s...
+FAILED business_app/tests/test_catalog.py::test_price_filter_combined_with_category
+FAILED business_app/tests/test_catalog.py::test_negative_min_price_rejected
+FAILED business_app/tests/test_catalog.py::test_negative_max_price_rejected
+FAILED business_app/tests/test_catalog.py::test_min_gt_max_rejected - TypeErr...
+8 failed, 5 passed in 0.31s

@@ -1,0 +1,34 @@
+﻿已重置到干净状态（v1 代码 + 空资料库 + 空记忆）
+
+=== [P1] 规格更新并重新导入后使用新内容 ===
+[PASS] P1a 仅导入 v1 时，上下文不含 v2 且不含价格区间要求  — specs=['business_app/specs/product_spec_v1.md']
+[PASS] P1b 重新导入 v2 后，上下文使用 v2（含价格区间筛选要求）  — v2 source=business_app/specs/product_spec_v2.md
+
+=== [P2] seekdb 实际存储/检索工程资料 ===
+[PASS] P2a seekdb 已存储规格/代码/测试资料  — stats={'total': 5, 'by_type': {'spec': 2, 'code': 2, 'test': 1}, 'vector_enabled': True}
+[PASS] P2b 查询结果含真实来源与命中信号  — specs=['business_app/specs/product_spec_v2.md', 'business_app/specs/product_spec_v1.md'] engine=seekdb-embedded vector=True
+
+=== [P3] 修改前：目标测试失败 / 回归通过 ===
+[PASS] P3 修改前目标测试因未实现而失败、回归通过  — exit=1 summary=8 failed, 5 passed in 0.31s
+
+=== [P4] MiniMax 实际参与代码修改 ===
+[PASS] P4a MiniMax 返回可编译代码并生成差异  — model=MiniMax-Text-01 diff_lines=59
+[PASS] P4b 修改已应用到 catalog.py
+
+=== [P5] 修改后：目标 + 回归全部通过 ===
+[PASS] P5 修改后目标功能测试 + 回归测试全部通过  — exit=0 summary=13 passed in 0.02s
+
+=== [P6] PowerContext 状态保存与重启复用 ===
+[PASS] P6 空状态写入后重启读取并复用  — empty=True reused=True done=1 todo=1 veri=1
+
+============================================================
+验证结果：9/9 通过
+  [PASS] P1a 仅导入 v1 时，上下文不含 v2 且不含价格区间要求
+  [PASS] P1b 重新导入 v2 后，上下文使用 v2（含价格区间筛选要求）
+  [PASS] P2a seekdb 已存储规格/代码/测试资料
+  [PASS] P2b 查询结果含真实来源与命中信号
+  [PASS] P3 修改前目标测试因未实现而失败、回归通过
+  [PASS] P4a MiniMax 返回可编译代码并生成差异
+  [PASS] P4b 修改已应用到 catalog.py
+  [PASS] P5 修改后目标功能测试 + 回归测试全部通过
+  [PASS] P6 空状态写入后重启读取并复用

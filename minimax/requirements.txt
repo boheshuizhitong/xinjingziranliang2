@@ -1,0 +1,24 @@
+# Minimax × OceanBase —— SDD 上下文管理系统 运行依赖
+# Python 3.11+（Windows/Linux/macOS）
+
+# --- Web / API ---
+fastapi>=0.111
+uvicorn>=0.30
+python-multipart>=0.0.9
+
+# --- seekdb 嵌入式（工程资料存储与混合检索）---
+# pylibseekdb: seekdb 的 Python 原生绑定（嵌入式模式，启动本地数据库）
+pylibseekdb>=1.4.0
+# pymysql: 通过 MySQL 协议连接嵌入式 seekdb 并执行 SQL
+pymysql>=1.1
+# pyseekdb: 高层客户端（本项目使用其 OnnxEmbeddingFunction 做本地中文向量化，可选）
+pyseekdb>=1.4.0
+
+# --- 测试 / 校验 ---
+pytest>=8.0
+
+# --- MiniMax API 调用 ---
+requests>=2.31
+
+# --- 代码差异生成 ---
+# difflib 为标准库，无需额外依赖
