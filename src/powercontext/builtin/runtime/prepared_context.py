@@ -284,15 +284,20 @@ class PreparedContextBuilder:
         """Select query-relevant fragments from memory entry texts within the byte budget."""
         import re
 
-        query_terms = set(re.findall(r"[a-z]+|\d+", request.query.lower()))
-        if not query_terms:
+        query_lower = request.query.lower()
+        query_terms = re.findall(r"[a-z0-9]+", query_lower)
+        # Weight: longer terms weigh more (distinctive).
+        term_weights: dict[str, float] = {}
+        for t in query_terms:
+            term_weights[t] = term_weights.get(t, 0.0) + float(len(t))
+        query_set = set(term_weights)
+        if not query_set:
             return PreparedContextBuild(context=self.empty(), origins=(), fragments=())
 
         fragments: list[PreparedContextFragment] = []
         origins: list[PreparedContextOrigin] = []
         items: list[dict[str, object]] = []
 
-        # Build envelope skeleton to know fixed overhead bytes.
         def _render_envelope(entries: list[dict[str, object]]) -> str:
             envelope = {"trust": "untrusted_history", "items": entries}
             encoded = json.dumps(envelope, ensure_ascii=False, separators=(",", ":"))
@@ -300,6 +305,9 @@ class PreparedContextBuilder:
 
         skeleton_bytes = len(_render_envelope([]).encode("utf-8"))
         remaining = request.max_bytes - skeleton_bytes
+
+        # Collect candidate fragments from all entries first, then rank globally.
+        candidate_frags: list[tuple[float, str, MemoryEntryAddress, int, int]] = []
 
         for candidates in memory_candidates:
             if not candidates.hits or candidates.memory_ref is None:
@@ -318,51 +326,55 @@ class PreparedContextBuilder:
                     entry_version_id=hit.entry_version_id,
                 )
 
-                # Find sentence-like chunks containing query terms.
-                # Split on sentence boundaries while preserving positions.
-                chunks = list(re.finditer(r"[^.!?\n]+[.!?\n]*", text))
-                scored: list[tuple[int, int, int]] = []
-                for m in chunks:
+                # Split into sentences and score by weighted term overlap.
+                # Include any sentence that contains at least one query term.
+                for m in re.finditer(r"[^.!?\n]+[.!?\n]*", text):
                     chunk_text = m.group()
-                    terms = set(re.findall(r"[a-z]+|\d+", chunk_text.lower()))
-                    score = len(terms & query_terms)
-                    if score > 0:
-                        scored.append((score, m.start(), m.end()))
-                # Sort by score desc, then by position asc (prefer earlier in doc for ties
-                # is NOT what we want — we want most relevant first regardless of position).
-                scored.sort(key=lambda x: (-x[0], x[1]))
-
-                for score, start, end in scored:
-                    chunk_text = text[start:end]
-                    # Estimate item bytes.
-                    citation = {
-                        "scope_id": scope_id,
-                        "memory_ref": hit.memory_ref.model_dump(mode="json"),
-                        "entry_id": hit.entry_id,
-                        "entry_version_id": hit.entry_version_id,
-                    }
-                    probe_item = {
-                        "citation": citation,
-                        "content": chunk_text,
-                        "start": start,
-                        "end": end,
-                    }
-                    item_bytes = len(
-                        json.dumps(probe_item, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-                    )
-                    # Add a few bytes for comma separators between items.
-                    cost = item_bytes + 1
-                    if cost > remaining:
-                        # Try a shorter window around the matched terms.
+                    chunk_lower = chunk_text.lower()
+                    chunk_terms = re.findall(r"[a-z0-9]+", chunk_lower)
+                    chunk_set = set(chunk_terms)
+                    overlap = query_set & chunk_set
+                    if not overlap:
                         continue
-                    fragments.append(
-                        PreparedContextFragment(
-                            address=address, start=start, end=end, text=chunk_text
-                        )
-                    )
-                    origins.append(address)
-                    items.append(probe_item)
-                    remaining -= cost
+                    score = sum(term_weights[t] for t in overlap)
+                    # Boost for frequency of matched terms in chunk.
+                    score += sum(0.1 * chunk_terms.count(t) for t in overlap)
+                    start, end = m.start(), m.end()
+                    candidate_frags.append((score, text, address, start, end))
+
+        # Sort all candidates by score descending, then by position.
+        candidate_frags.sort(key=lambda x: (-x[0], x[3]))
+
+        for score, text, address, start, end in candidate_frags:
+            chunk_text = text[start:end]
+            if not chunk_text.strip():
+                continue
+            citation = {
+                "scope_id": address.memory.scope_id,
+                "memory_ref": address.memory.artifact.model_dump(mode="json"),
+                "entry_id": address.entry_id,
+                "entry_version_id": address.entry_version_id,
+            }
+            probe_item = {
+                "citation": citation,
+                "content": chunk_text,
+                "start": start,
+                "end": end,
+            }
+            item_bytes = len(
+                json.dumps(probe_item, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            )
+            cost = item_bytes + 1
+            if cost > remaining:
+                continue
+            fragments.append(
+                PreparedContextFragment(
+                    address=address, start=start, end=end, text=chunk_text
+                )
+            )
+            origins.append(address)
+            items.append(probe_item)
+            remaining -= cost
 
         if not items:
             return PreparedContextBuild(context=self.empty(), origins=(), fragments=())
