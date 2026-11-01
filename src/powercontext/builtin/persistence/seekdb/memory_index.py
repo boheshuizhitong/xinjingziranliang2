@@ -52,7 +52,11 @@ SELECT * FROM (
     WHERE h.scope_id = :scope_id
       AND h.memory_artifact_id IN :memory_artifact_ids
       AND MATCH(h.searchable_text) AGAINST(:analyzed_query IN BOOLEAN MODE)
-    UNION ALL
+    ORDER BY h.memory_artifact_id, h.entry_id
+    LIMIT :candidate_limit
+) AS fts_results
+UNION ALL
+SELECT * FROM (
     SELECT
         ve.memory_artifact_id,
         ve.head_revision,
@@ -68,24 +72,69 @@ SELECT * FROM (
      AND ver.entry_version_id = ve.entry_version_id
     WHERE ve.scope_id = :scope_id
       AND ve.memory_artifact_id IN :memory_artifact_ids
-) AS combined
-ORDER BY combined.channel DESC, combined.distance ASC
-LIMIT :candidate_limit
+    ORDER BY l2_distance(ve.embedding, :query_vector) APPROXIMATE
+    LIMIT :candidate_limit
+) AS vector_results
 """
 
-_HYBRID_SQL_TAGGED = _HYBRID_SQL.replace(
-    "MATCH(h.searchable_text)",
-    "MATCH(h.searchable_text)",
-).replace(
-    "UNION ALL",
-    memory_tag_sql("h") + "\n    UNION ALL",
-).replace(
-    "WHERE ve.scope_id",
-    "WHERE ve.scope_id",
-).replace(
-    ") AS combined",
-    memory_tag_sql("ve") + "\n) AS combined",
-)
+_HYBRID_SQL_TAGGED = """
+SELECT * FROM (
+    SELECT
+        h.memory_artifact_id,
+        h.head_revision,
+        h.entry_id,
+        h.entry_version_id,
+        v.text,
+        CAST(NULL AS DECIMAL(20,10)) AS distance,
+        'fts' AS channel
+    FROM pc_memory_entry_heads AS h
+    JOIN pc_memory_entry_versions AS v
+      ON v.scope_id = h.scope_id
+     AND v.memory_artifact_id = h.memory_artifact_id
+     AND v.entry_version_id = h.entry_version_id
+    WHERE h.scope_id = :scope_id
+      AND h.memory_artifact_id IN :memory_artifact_ids
+      AND MATCH(h.searchable_text) AGAINST(:analyzed_query IN BOOLEAN MODE)
+      AND (SELECT COUNT(*) FROM pc_artifact_tags AS tags
+           WHERE tags.scope_id = h.scope_id
+             AND tags.family = 'memory'
+             AND tags.artifact_id = h.memory_artifact_id
+             AND tags.target_type = 'memory_entry'
+             AND tags.target_id = h.entry_id
+             AND tags.tag_key_hash IN :tag_hashes
+             AND tags.tag_key IN :tag_keys) >= :tag_minimum
+    ORDER BY h.memory_artifact_id, h.entry_id
+    LIMIT :candidate_limit
+) AS fts_results
+UNION ALL
+SELECT * FROM (
+    SELECT
+        ve.memory_artifact_id,
+        ve.head_revision,
+        ve.entry_id,
+        ve.entry_version_id,
+        ver.text,
+        l2_distance(ve.embedding, :query_vector) AS distance,
+        'vector' AS channel
+    FROM pc_memory_vector_entries AS ve
+    JOIN pc_memory_entry_versions AS ver
+      ON ver.scope_id = ve.scope_id
+     AND ver.memory_artifact_id = ve.memory_artifact_id
+     AND ver.entry_version_id = ve.entry_version_id
+    WHERE ve.scope_id = :scope_id
+      AND ve.memory_artifact_id IN :memory_artifact_ids
+      AND (SELECT COUNT(*) FROM pc_artifact_tags AS tags
+           WHERE tags.scope_id = ve.scope_id
+             AND tags.family = 'memory'
+             AND tags.artifact_id = ve.memory_artifact_id
+             AND tags.target_type = 'memory_entry'
+             AND tags.target_id = ve.entry_id
+             AND tags.tag_key_hash IN :tag_hashes
+             AND tags.tag_key IN :tag_keys) >= :tag_minimum
+    ORDER BY l2_distance(ve.embedding, :query_vector) APPROXIMATE
+    LIMIT :candidate_limit
+) AS vector_results
+"""
 
 
 class SeekDBHybridMemoryIndex:
