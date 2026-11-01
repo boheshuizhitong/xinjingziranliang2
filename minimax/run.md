@@ -36,7 +36,7 @@ python3 -m pip install -r requirements.txt
 ```powershell
 Copy-Item .env.example .env
 # 编辑 .env，填入：
-#   MINIMAX_API_KEY=<你的密钥>          # platform.minimaxi.com -> API管理 -> API Key -> 创建密钥
+#   MINIMAX_API_KEY=<你的密钥>          # platform.minimax.cn -> API管理 -> API Key -> 创建密钥
 #   MINIMAX_BASE_URL=https://api.minimax.cn/v1
 #   MINIMAX_MODEL=<可用模型>            # 如 MiniMax-Text-01 / MiniMax-M1 / abab6.5s-chat
 ```
