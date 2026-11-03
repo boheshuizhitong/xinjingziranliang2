@@ -52,7 +52,8 @@ SELECT * FROM (
     WHERE h.scope_id = :scope_id
       AND h.memory_artifact_id IN :memory_artifact_ids
       AND MATCH(h.searchable_text) AGAINST(:analyzed_query IN BOOLEAN MODE)
-    ORDER BY h.memory_artifact_id, h.entry_id
+    ORDER BY MATCH(h.searchable_text) AGAINST(:analyzed_query IN BOOLEAN MODE) DESC,
+             h.memory_artifact_id, h.entry_id
     LIMIT :candidate_limit
 ) AS fts_results
 UNION ALL
@@ -103,7 +104,8 @@ SELECT * FROM (
              AND tags.target_id = h.entry_id
              AND tags.tag_key_hash IN :tag_hashes
              AND tags.tag_key IN :tag_keys) >= :tag_minimum
-    ORDER BY h.memory_artifact_id, h.entry_id
+    ORDER BY MATCH(h.searchable_text) AGAINST(:analyzed_query IN BOOLEAN MODE) DESC,
+             h.memory_artifact_id, h.entry_id
     LIMIT :candidate_limit
 ) AS fts_results
 UNION ALL
