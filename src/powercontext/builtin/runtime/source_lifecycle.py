@@ -395,24 +395,32 @@ class ScopedSourceLifecycleService:
             raise SourceLifecycleError(f"unknown source node: {event.node_id!r}")
         if event.revision != node.revision:
             raise SourceLifecycleError(f"revision mismatch for {event.node_id!r}")
-        # Idempotent replay: same sequence + same available state is OK.
+        # Idempotent replay: same sequence + same available state.
+        # Re-apply derived memory states to recover from interrupted propagation.
         if event.sequence == node.sequence:
-            if event.available == node.available:
-                return self._active_nodes()
-            raise SourceLifecycleError("same sequence with different state")
+            if event.available != node.available:
+                raise SourceLifecycleError("same sequence with different state")
+            # Re-apply memory states for all derived nodes to complete any
+            # interrupted propagation.  forget/reactivate are idempotent on
+            # entries already in the right state.
+            for derived in self._nodes.values():
+                if derived.node_type == "memory":
+                    await self._set_memory_entry_state(derived, derived.available)
+            return self._active_nodes()
         if event.sequence < node.sequence:
             raise SourceLifecycleError("sequence must be monotonically increasing")
         node.available = event.available
         node.sequence = event.sequence
         changed = self._propagate()
-        # Persist the source node update.
-        await self._persist_node(node)
-        for changed_node, _ in changed:
-            await self._persist_node(changed_node)
-        # Apply memory state changes.
+        # Apply memory state changes first; persist only after all succeed so
+        # that a failure leaves the event uncommitted for retry.
         for changed_node, available in changed:
             if changed_node.node_type == "memory":
                 await self._set_memory_entry_state(changed_node, available)
+        # Now persist everything.
+        await self._persist_node(node)
+        for changed_node, _ in changed:
+            await self._persist_node(changed_node)
         return self._active_nodes()
 
     def _active_nodes(self) -> list[str]:
